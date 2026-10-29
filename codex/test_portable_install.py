@@ -97,6 +97,8 @@ class PortableInstallTests(unittest.TestCase):
             plist.write_bytes(original)
             attempts = []
             def run(args, **kwargs):
+                if 'print' in args:
+                    return subprocess.CompletedProcess(args, 113)
                 if 'bootstrap' in args:
                     attempts.append(args)
                     if len(attempts) == 1:
@@ -108,6 +110,23 @@ class PortableInstallTests(unittest.TestCase):
             self.assertEqual((dest/'keep').read_text(), 'old version')
             self.assertEqual(plist.read_bytes(), original)
             self.assertEqual(len(attempts), 2)
+
+    def test_waits_for_old_service_removal_before_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self.fixture(root)
+            remaining = [2]
+            def run(args, **kwargs):
+                if 'print' in args:
+                    remaining[0] -= 1
+                    return subprocess.CompletedProcess(args, 0 if remaining[0] >= 0 else 113)
+                if 'bootstrap' in args and remaining[0] >= 0:
+                    raise subprocess.CalledProcessError(5, args)
+                return subprocess.CompletedProcess(args, 0)
+            with patch.object(desktop_install.subprocess, 'run', side_effect=run), \
+                 patch('time.sleep'):
+                desktop_install.install_app(source, root/'installed.app', root/'agent.plist', root/'data')
+            self.assertLess(remaining[0], 0)
 
 
 if __name__ == '__main__':

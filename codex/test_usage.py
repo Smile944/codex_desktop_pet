@@ -14,7 +14,29 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(result['windows'][0]['resetsAt'], 1793774143)
         self.assertEqual(result['planType'], 'pro')
         self.assertEqual(result['creditsBalance'], '123.4000')
-        self.assertEqual(usage_summary(result), 'Codex · 7 天额度剩余 75%')
+        self.assertEqual(usage_summary(result, now=1793774143-3*86400-5*3600-123),
+                         'Codex · 3 天 5 小时额度剩余 75%')
+
+    def test_countdown_changes_with_time_without_new_quota_data(self):
+        snapshot = parse_usage(self.sample())
+        reset = snapshot['windows'][0]['resetsAt']
+        self.assertEqual(usage_summary(snapshot, now=reset-86400),
+                         'Codex · 1 天 0 小时额度剩余 75%')
+        self.assertEqual(usage_summary(snapshot, now=reset-23*3600),
+                         'Codex · 0 天 23 小时额度剩余 75%')
+
+    def test_countdown_less_than_one_hour_and_expired_reset(self):
+        snapshot = parse_usage(self.sample())
+        reset = snapshot['windows'][0]['resetsAt']
+        self.assertEqual(usage_summary(snapshot, now=reset-3599),
+                         'Codex · 不足 1 小时额度剩余 75%')
+        for now in (reset, reset+60):
+            self.assertEqual(usage_summary(snapshot, now=now), 'Codex · 等待额度刷新')
+
+    def test_unknown_reset_does_not_invent_a_countdown(self):
+        data = self.sample()
+        data['rateLimitsByLimitId']['codex']['primary'].pop('resetsAt')
+        self.assertEqual(usage_summary(parse_usage(data), now=1), 'Codex · 7 天额度剩余 75%')
 
     def test_missing_is_unknown_not_zero_and_invalid_windows_ignored(self):
         result = parse_usage({'rateLimits': {'primary':None,'secondary':None}})

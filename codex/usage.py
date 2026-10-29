@@ -62,11 +62,28 @@ def parse_usage(result):
                 checkedAt=int(time.time()*1000))
 
 
-def usage_summary(snapshot):
+def usage_summary(snapshot, now=None):
     windows = snapshot.get('windows') or []
     if not windows:
         return 'Codex · 暂未提供额度数据'
-    return ' · '.join('Codex · ' + w['label'] + f"剩余 {w['remainingPercent']:g}%" for w in windows[:2])
+    now = time.time() if now is None else now
+    summaries = []
+    for window in windows[:2]:
+        label = window['label']
+        reset = window.get('resetsAt')
+        if reset is not None:
+            seconds = reset - now
+            if seconds <= 0:
+                summaries.append('Codex · 等待额度刷新')
+                continue
+            hours = int(seconds // 3600)
+            if hours:
+                days, hours = divmod(hours, 24)
+                label = f'{days} 天 {hours} 小时额度'
+            else:
+                label = '不足 1 小时额度'
+        summaries.append('Codex · ' + label + f"剩余 {window['remainingPercent']:g}%")
+    return ' · '.join(summaries)
 
 
 class UsageRPC:

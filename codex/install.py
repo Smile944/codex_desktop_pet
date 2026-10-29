@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parent / 'dist/大肥鱼 · Codex.app'
@@ -19,6 +20,19 @@ def installed_python(app):
     """A packaged app always uses its own runtime after relocation."""
     embedded = app / 'Contents/Resources/python/bin/python3'
     return str(embedded) if embedded.is_file() else sys.executable
+
+
+def stop_agent(domain):
+    """bootout returns before the old process and service are fully removed."""
+    target = domain + '/' + LABEL
+    subprocess.run(['/bin/launchctl', 'bootout', target],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 15
+    while subprocess.run(['/bin/launchctl', 'print', target],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        if time.monotonic() >= deadline:
+            raise TimeoutError('旧桌宠后台服务仍在退出，请稍后重试安装。')
+        time.sleep(0.1)
 
 
 def install_app(source, dest=DEST, plist=PLIST, data=DATA, start=True):
@@ -36,8 +50,7 @@ def install_app(source, dest=DEST, plist=PLIST, data=DATA, start=True):
         replaced = False
         try:
             if start:
-                subprocess.run(['/bin/launchctl', 'bootout', domain + '/' + LABEL],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stop_agent(domain)
                 stopped = True
             if dest.exists():
                 dest.rename(backup)
@@ -79,7 +92,7 @@ def main():
     args = parser.parse_args()
     domain = 'gui/' + str(os.getuid())
     if args.uninstall:
-        subprocess.run(['/bin/launchctl', 'bootout', domain + '/' + LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stop_agent(domain)
         PLIST.unlink(missing_ok=True)
         if DEST.exists():
             shutil.rmtree(DEST)

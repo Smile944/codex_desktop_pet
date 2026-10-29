@@ -31,3 +31,10 @@ python3 -B codex/verification/verify_release.py codex/dist/releases/Codex-BigFis
 ```
 
 第二条需要本机能执行 x86_64（Intel 或已安装 Rosetta）；否则加 --static-only，仅检查静态文件与迁移签名。无需为使用 Apple 芯片安装包安装 Rosetta。
+
+## 0.4.1 气泡额度倒计时
+
+- 72 项 Python 测试通过（系统 Python 3.9 与安装包内 Python 3.12）。覆盖跨天/小时、不足一小时、到期不展示旧比例、缺失重置时间，以及升级时等待旧后台服务移除。
+- 真实本机升级复现并修复 launchctl bootout 异步退出竞态；升级后 Helper 正常运行，snapshot 的额度摘要使用“X 天 X 小时”格式，原设置文件字节保持一致。未将个人额度或截图纳入仓库。
+- 两种最终 DMG 的签名、挂载/推出后迁移、内置运行环境及真实 Codex CLI 插件发现均通过；Intel 仍为 Rosetta 验证，未声称 Intel 真机验收。
+- 倒计时格式和安装等待逻辑均经过独立只读审查，无确认缺陷。
