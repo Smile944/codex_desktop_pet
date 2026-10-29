@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-bigfish",
+  "version": "0.3.4",
+  "description": "本机大肥鱼桌面伴侣与 Codex 原生会话面板。",
+  "author": {
+    "name": "本地适配"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "大肥鱼 · Codex",
+        "shortDescription": "原版桌宠、任务状态和 Codex 额度",
+        "developerName": "本地适配",
+        "category": "Productivity",
+        "capabilities": [
+          "Interactive"
+        ]
+      }
+    }
+  }
+}
