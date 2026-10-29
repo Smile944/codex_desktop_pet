@@ -13,3 +13,10 @@ React and ReactDOM 18.3.1 include their MIT licenses under codex/vendor/. The bu
 The restricted archived assets from the upstream legacy/dafeiyu directory are not included in this distribution. No additional rights to those archived assets are granted.
 
 This is an unofficial adaptation. Project names and marks remain the property of their respective owners; no OpenAI or DeepSeek endorsement is implied.
+
+# 独立安装包运行环境
+
+0.4.0 独立安装包包含 Astral python-build-standalone 提供的 CPython 3.12.16（20261026）及其依赖。
+下载 URL/SHA256 固定在 `codex/runtime-lock.json`；来源和许可证哈希在
+`codex/runtime-licenses/PROVENANCE.json`。发行包保留该目录的许可证、Python 自带
+`lib/python3.12/LICENSE.txt`、pip 及其依赖自带的许可证。此运行环境不更改系统 Python。

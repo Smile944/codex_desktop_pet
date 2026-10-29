@@ -1,0 +1,24 @@
+大肥鱼 · Codex 独立安装版
+
+要求：macOS 13 或更新版本；Codex.app 或带 Codex CLI 的 ChatGPT.app 已安装在 /Applications。
+arm64 对应 Apple 芯片，x86_64 对应 Intel。无需安装 Python、npm 或 Apple 开发工具。
+
+1. 双击“安装大肥鱼 · Codex.app”，点击“安装”。无需拖动或管理员密码。
+2. 完成后进入 Codex → 设置 → 插件 → 大肥鱼 · Codex。
+3. 如列表未刷新，重新进入插件页或重启 Codex。启用后跟随 Codex 运行。
+4. 安装完成后可以推出此磁盘、删除下载的 DMG。
+
+本版本使用临时签名，没有 Apple Developer ID 公证。首次打开如果被 macOS 拦截，
+在“系统设置 → 隐私与安全性”中检查来源并选择“仍要打开”，然后按系统提示继续。
+不需要关闭 Gatekeeper 或更改系统全局安全设置。
+
+安装位置：~/Applications/大肥鱼 · Codex.app
+用户设置：~/Library/Application Support/Codex BigFish/
+自动启动：~/Library/LaunchAgents/local.codex.bigfish.plist
+升级重新运行新版本安装器；保留已有设置。右键“本次关闭”后，在设置中将启用开关关闭再打开。
+
+卸载：双击本磁盘中的“卸载桌宠.command”，再在 Codex 插件页卸载大肥鱼。
+用户设置保留。卸载不删除 Codex、Python 系统环境或其他插件。
+
+来源、许可证、已知限制与源码：https://github.com/Smile944/codex_desktop_pet
+安装应用内部 Resources/大肥鱼 · Codex.app/Contents/Resources 包含第三方许可证。

@@ -1,0 +1,2 @@
+# Preserve upstream license files verbatim, including their final blank lines.
+codex/runtime-licenses/LICENSE* -whitespace

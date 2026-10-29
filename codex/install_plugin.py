@@ -14,7 +14,7 @@ def prepare_package(source, package, runtime):
     mcp_path = package/'mcp.json'
     mcp = json.loads(mcp_path.read_text())
     launcher=package/'run-server'
-    launcher.write_text('#!/bin/sh\nexec '+shlex.quote(runtime)+' -B "$(dirname "$0")/server.py"\n')
+    launcher.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+shlex.quote(runtime)+' -E -s -B "$(dirname "$0")/server.py"\n')
     launcher.chmod(0o755)
     server=mcp['mcpServers']['bigfish']
     server['command']='./run-server'
@@ -25,13 +25,13 @@ def prepare_package(source, package, runtime):
     (package/'.mcp.json').unlink(missing_ok=True)
 
 
-def install():
+def install(source=None, runtime=None):
     cli = next((p for p in CLI_CANDIDATES if Path(p).is_file()), None)
     if cli is None:
         raise OSError('Codex CLI is unavailable')
     root = Path.home()/'Library/Application Support/Codex BigFish/plugin-marketplace'
     package = root/'plugins/codex-bigfish'
-    prepare_package(Path(__file__).parent/'plugin', package, sys.executable)
+    prepare_package(source or Path(__file__).parent/'plugin', package, runtime or sys.executable)
     marketplace = root/'.agents/plugins/marketplace.json'
     marketplace.parent.mkdir(parents=True, exist_ok=True)
     marketplace.write_text(json.dumps({

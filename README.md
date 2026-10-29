@@ -1,10 +1,27 @@
 # 大肥鱼 · Codex 桌面宠物
 
-将 QCYTSN/dsh-dafeiyu 的原版角色、动画、声音与设置卡片适配到 Codex。当前支持 **macOS 本机源码安装**，不需要 npm。
+将 QCYTSN/dsh-dafeiyu 的原版角色、动画、声音与设置卡片适配到 Codex。提供 **macOS 独立安装包**及源码安装，不需要 npm。
 
-插件版本 0.3.4，桌面应用版本 0.3.1。Codex 原生插件详情页提供启用开关、1%–100% 角色大小和“打开完整设置”；完整设置会在程序内弹出。
+插件及桌面应用版本 0.4.0。Codex 原生插件详情页提供启用开关、1%–100% 角色大小和“打开完整设置”；完整设置会在程序内弹出。
 
-## 下载后怎样使用
+## 普通用户：下载安装包
+
+打开 [Releases 下载页](https://github.com/Smile944/codex_desktop_pet/releases/latest)，下载与你的 Mac 芯片对应的 DMG：
+
+- Apple 芯片（M1/M2/M3/M4 等）：`macOS-arm64.dmg`。
+- Intel 芯片：`macOS-x86_64.dmg`。此包为交叉编译版本，尚未在 Intel 真机验收。
+
+要求 **macOS 13+**，以及已经安装到 `/Applications` 的 Codex.app，或包含 Codex CLI 的 ChatGPT.app。安装包自带 Python 和预编译桌宠，**无需另装 Python、npm、Swift 或 Command Line Tools**。安装过程无需下载依赖或管理员密码。
+
+1. 打开 DMG，双击“安装大肥鱼 · Codex.app”，点击“安装”。
+2. 完成后进入 Codex → 设置 → 插件 → 大肥鱼 · Codex。列表未刷新时重新进入或重启 Codex。
+3. 安装完成后即可推出磁盘、删除 DMG。运行环境已经复制到用户应用目录。
+
+**首次打开：**当前是临时签名版本，没有 Apple Developer ID 公证。若 macOS 拦截，请在“系统设置 → 隐私与安全性”核对来源后选择“仍要打开”，按系统提示继续。无需关闭 Gatekeeper。只有具备 Apple Developer ID 证书并完成公证后，才能进一步减少来源提示。
+
+升级重新运行新版安装器，保留已有设置。卸载可双击 DMG 内的“卸载桌宠.command”，再在 Codex 插件页卸载插件；用户设置保留。桌宠仍需本机 Codex 正常登录才能显示对应账户额度。
+
+## 开发者：源码安装
 
 **需要下载整个仓库并运行安装器。只安装 codex/plugin 目录，不能启动桌面角色。** 安装器会依次构建原生程序、安装用户级后台服务、注册 Codex 本地插件。
 
@@ -25,7 +42,7 @@ bash Install.command
 
 安装完成后，在 Codex 中进入“设置 → 插件 → 大肥鱼 · Codex”。如果尚未刷新，重新进入插件页，或在方便时重启 Codex。通过“打开完整设置”调整气泡、声音、活跃程度等。
 
-仓库若保持私有，其他人需要具有仓库读取权限才能下载。代码内不包含任何用户的 GitHub、Codex 或 DeepSeek 凭据，每位用户读取自己的本机 Codex 状态和账户额度。
+仓库公开，任何人均可下载。代码及安装包不包含任何用户的 GitHub、Codex 或 DeepSeek 凭据，每位用户读取自己的本机 Codex 状态和账户额度。
 
 ## 功能
 
@@ -42,7 +59,8 @@ bash Install.command
 ## 当前限制
 
 - 目前只提供 macOS 适配；没有验证 Windows / Linux 的 Codex 接入。
-- 这是源码安装流程，不是免依赖、下载即运行的通用安装包。不要复制其他机器已经构建的 .app；启动器会记录构建时选定的 Python 路径。清理或移动该 Python 后需重新安装。
+- 独立安装包自带运行环境；源码构建的普通 .app 则仍绑定构建时选定的 Python，请勿当作独立安装包转发。源码安装使用的 Python 被清理或移动后需重新安装。
+- 独立包最低 macOS 13，Apple 芯片版在 macOS 14.4 上验证。Intel 版提供交叉编译产物，尚未进行 Intel 真机回归。当前未做 Apple Developer ID 公证，可能出现首次打开提示。
 - 原生权限审批的精确同步依赖宿主共享状态接口。当前环境未提供该端点时，观察器报告不可用；不将权限请求意图冒充实际等待。
 - 主聊天区任意悬浮注入不在公开插件接口内；提供独立桌面角色和程序内设置面板。
 - 全屏/Spaces、拔掉显示器后的恢复、完整宿主退出重开、声音和系统通知仍有实际验收边界。
@@ -56,6 +74,15 @@ python3 -B codex/build.py
 ```
 
 原版纯 Swift 核心有 Swift Package 测试：完整 Xcode 可用时在仓库根目录运行 `swift test`。只装 Command Line Tools 的环境可能缺 XCTest，可运行 `python3 -B codex/verification/run_native_portable.py` 验证原始断言；这不冒充官方 XCTest。全量静态绘制检查可在 build.py 生成源码副本后运行 `codex/verification/run_full_visual.py`，生成的本机证据不会纳入源码仓库。
+
+维护者制作独立安装包（构建机需要 Python 和 Command Line Tools）：
+
+```bash
+python3 -B codex/release.py --arch arm64
+python3 -B codex/release.py --arch x86_64
+```
+
+脚本下载 `codex/runtime-lock.json` 固定版本的 Python Standalone Builds，校验 SHA256，交叉编译、签署并生成 `codex/dist/releases/` 下的 DMG。运行环境及产物不提交 Git；Python 及依赖许可证保存在安装包内 `runtime-licenses/` 和 Python 自带的 LICENSE.txt 中。
 
 ## 卸载（保留用户设置）
 

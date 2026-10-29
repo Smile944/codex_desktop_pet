@@ -13,7 +13,7 @@ BASE = Path(__file__).resolve().parent
 RESOURCES = Path.home() / 'Applications/大肥鱼 · Codex.app/Contents/Resources'
 DATA = Path.home() / 'Library/Application Support/Codex BigFish'
 UI_URI = 'ui://codex-bigfish/companion'
-VERSION = '0.3.4'
+VERSION = '0.4.0'
 SETTINGS_CAPABILITY = {'readTool':'settings_read','updateTool':'settings_update'}
 SETTINGS_FIELDS = {
     'enabled':{'type':'boolean','title':'启用大肥鱼'},

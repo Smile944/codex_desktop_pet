@@ -2,7 +2,7 @@
 
 2026-10-29 在 macOS 14.4、Swift 5.10 与可用 Python 环境上验证。分发副本已独立运行，不依赖开发目录中的额外文件。
 
-- 分发副本中的 Python 单元测试：57/57 通过，包括配置、事件解析、原生插件设置契约、安装脚本、含空格路径的插件启动器。
+- 分发副本中的 Python 单元测试（初版源码快照）：57/57 通过，包括配置、事件解析、原生插件设置契约、安装脚本、含空格路径的插件启动器。
 - `bash Install.command --check`：通过，只检查环境，没有安装或重启宿主。
 - `python3 -B codex/build.py`：成功编译本机原生 Helper 和完整应用；打包 3,453 个素材文件哈希一致，签名检查通过。此次验证没有用分发副本覆盖用户已安装的桌宠。
 - 原先已安装版本的原生设置入口：用户截图确认插件详情页有启用/大小控件，点击后在宿主内打开完整设置弹窗。
@@ -12,3 +12,22 @@
 实际验收已确认拖动、摸头、右键菜单、透明区域点击穿透、拖到另一显示器，以及程序内打开完整设置。全屏/Spaces、不同缩放和拔屏恢复、完整退出重开、声音通知仍有未覆盖场景；权限审批精确同步也取决于宿主状态接口。详细范围见 README。
 
 本机诊断日志、个人配置、截图和历史工具输出不随源码分发；验证器可在各自机器上重新生成本地证据。端到端测试不是对其他 macOS 版本或 Intel Mac 的验收承诺。
+
+## 0.4.0 独立安装包
+
+- 68 项 Python 单元测试通过（系统 Python 3.9 与内置 Python 3.12）。新增迁移后 MCP 初始化、安装失败回退、设置保留、归档 SHA256/路径检查及 fallback Python 隔离回归。
+- arm64、x86_64 分别编译原生 Helper/安装界面，内置固定摘要的 CPython 3.12.16（20261026），3453 个素材文件与原版一致；应用签名及 DMG 校验通过。
+- 实际挂载各 DMG，在含中文和空格的临时用户目录安装（不启动真实用户 LaunchAgent），推出 DMG 后运行已安装 Python/MCP，验证完整设置 HTML、动画清单、9 个工具。
+- 在临时 HOME/CODEX_HOME 中使用本机真实 Codex CLI 注册插件；原生 app-server 发现 bigfish、9 个工具及 openai/settings，toolsError=null。未更改真实用户的插件注册、桌宠或设置。
+- arm64 直接运行；x86_64 在本机 Rosetta 下运行，不等同于 Intel 真机或 macOS 13 验收。
+- 新安装器的 --check 原生入口执行通过；未声称已人工验收 GUI 点击流程、浏览器下载后 Gatekeeper 提示或完整宿主重启。无 Developer ID，因此仅临时签名，未公证。
+- 独立只读代码审查未发现 Critical/Important 问题；发现既有 fallback 启动路径未传递 -E/-s，已用先失败后通过的回归测试补齐。
+
+复现：
+
+```bash
+python3 -B codex/verification/verify_release.py codex/dist/releases/Codex-BigFish-0.4.0-macOS-arm64.dmg
+python3 -B codex/verification/verify_release.py codex/dist/releases/Codex-BigFish-0.4.0-macOS-x86_64.dmg
+```
+
+第二条需要本机能执行 x86_64（Intel 或已安装 Rosetta）；否则加 --static-only，仅检查静态文件与迁移签名。无需为使用 Apple 芯片安装包安装 Rosetta。

@@ -31,7 +31,7 @@ if url is None:
     resources = BASE.parent
     helper = resources / 'BigFish Helper.app/Contents/MacOS/bigfish-helper'
     with (DATA / 'host.log').open('ab') as log:
-        subprocess.Popen([sys.executable, '-B', '-u', str(BASE / 'host.py'), '--resources', str(resources),
+        subprocess.Popen([sys.executable, '-E', '-s', '-B', '-u', str(BASE / 'host.py'), '--resources', str(resources),
                           '--helper', str(helper)], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True)
     for _ in range(40):

@@ -1,6 +1,6 @@
 {
   "name": "codex-bigfish",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "本机大肥鱼桌面伴侣与 Codex 原生会话面板。",
   "interface": {
     "displayName": "大肥鱼 · Codex",
