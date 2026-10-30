@@ -65,11 +65,13 @@ final class PetController: NSObject {
     private static let pinnedCollectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
     private static let draggingCollectionBehavior: NSWindow.CollectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
 
-    private var frameData: [String: Data] = [:]
-    private let imageCache = NSCache<NSString, NSImage>()
-    /// Decoded frames are held only in this bounded cache: a 24 fps set is
-    /// thousands of frames and each decoded one costs about 0.55 MB.
-    private static let decodedFrameCache = 24
+    private var frames: FrameStore!
+    var randomAnimations = true
+    private var motion: AnimationMotion?
+    private var motionClip: String?
+    private var motionStartedMs = 0
+    private var manualDeadlineMs: Int?
+    private var lastBalanceAnimationMs: Int?
     private var maxFrameWidth: CGFloat = 238
     private var maxFrameHeight: CGFloat = 260
 
@@ -190,22 +192,20 @@ final class PetController: NSObject {
     // MARK: - Frames & geometry
 
     private func loadFrames() {
-        for clip in model.clips.values {
-            for frame in clip.frames where frameData[frame] == nil {
-                frameData[frame] = try? Data(contentsOf: assetRoot.appendingPathComponent(frame))
-            }
-        }
-        imageCache.totalCostLimit = Self.decodedFrameCache * decodedFrameBytes
+        frames = FrameStore(root: assetRoot, frames: Set(model.clips.values.flatMap { $0.frames }))
     }
 
-    private var decodedFrameBytes: Int { Int(maxFrameWidth * maxFrameHeight * 4) }
+    private func frameImage(for frame: String) -> NSImage? { frames.image(for: frame) }
 
-    private func frameImage(for frame: String) -> NSImage? {
-        let key = frame as NSString
-        if let cached = imageCache.object(forKey: key) { return cached }
-        guard let data = frameData[frame], let image = NSImage(data: data) else { return nil }
-        imageCache.setObject(image, forKey: key, cost: decodedFrameBytes)
-        return image
+    /// Imported full canvases retain their original pixels per point. Only the
+    /// opaque character region captures clicks; props can still draw outside it.
+    func interactionRect() -> NSRect {
+        let canvas = petRect()
+        guard let raw = manifest["contentRect"] as? [Any], raw.count == 4 else { return canvas }
+        let values = raw.compactMap { Self.doubleValue($0) }
+        guard values.count == 4, values.allSatisfy({ $0.isFinite }), values[2] > 0, values[3] > 0 else { return canvas }
+        return NSRect(x: canvas.minX + values[0] * scale, y: canvas.minY + values[1] * scale,
+                      width: values[2] * scale, height: values[3] * scale).intersection(canvas)
     }
 
     private var petWidth: CGFloat { maxFrameWidth * scale }
@@ -406,7 +406,7 @@ final class PetController: NSObject {
         let windowPoint = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
         let viewPoint = contentView.convert(windowPoint, from: nil)
         let bubble = bubbleVisible() ? bubbleRect() : nil
-        setClickThrough(!PetGeometry.isInteractive(viewPoint, pet: petRect(), bubble: bubble))
+        setClickThrough(!PetGeometry.isInteractive(viewPoint, pet: interactionRect(), bubble: bubble))
     }
 
     private func setClickThrough(_ enabled: Bool) {
@@ -429,16 +429,31 @@ final class PetController: NSObject {
 
     private func scheduleMicro() {
         microTimer?.invalidate()
-        guard !reducedMotion else { return }
-        let range = model.idleMicroInterval(activityLevel: activityLevel)
-        let delay = Double(model.overlayRemainingMs + Int.random(in: range)) / 1000
+        guard !reducedMotion, randomAnimations, !isHeadless() else { return }
+        let hasPools = model.rules.hasRandomPools
+        let delay: Double
+        if hasPools {
+            let remaining = model.overlayRemainingMs > 0 ? model.overlayRemainingMs : model.activeClip.frames.count * model.activeClip.frameMs
+            delay = max(0.05, Double(remaining) / 1000)
+        } else {
+            delay = Double(model.overlayRemainingMs + Int.random(in: model.idleMicroInterval(activityLevel: activityLevel))) / 1000
+        }
         microTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             if !self.dragging {
                 let previousFrame = self.model.frame
                 let previousClip = self.model.activeClipName
-                let index = Int.random(in: 0..<max(1, self.model.idleMicroClips.count))
-                _ = self.model.playIdleMicro(index: index)
+                if hasPools {
+                    // A timer and the final frame may share a run-loop turn.
+                    self.model.advance(elapsedMs: max(0, Self.nowMs() - self.lastTickMs), nowMs: Self.nowMs())
+                    self.lastTickMs = Self.nowMs()
+                    if let choice = self.model.nextAmbient(roll: Double.random(in: 0..<1), categoryRoll: Double.random(in: 0..<1),
+                        actionRoll: Double.random(in: 0..<1)) {
+                        self.playAmbient(choice)
+                    }
+                } else {
+                    _ = self.model.playIdleMicro(index: Int.random(in: 0..<max(1, self.model.idleMicroClips.count)))
+                }
                 self.syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
                 self.contentView?.needsDisplay = true
             }
@@ -446,16 +461,60 @@ final class PetController: NSObject {
         }
     }
 
-    private func tick() {
-        let now = Self.nowMs()
+    private func plannedMotion(for clipName: String) -> AnimationMotion? {
+        guard let params = model.rules.moveParameters[clipName], let clip = model.clips[clipName],
+              let screen = screenContaining(NSPoint(x: petX + petWidth / 2, y: petY + petHeight / 2)) ?? NSScreen.main else { return nil }
+        return AnimationMotion.plan(start: CGPoint(x: petX, y: petY), petSize: CGSize(width: petWidth, height: petHeight),
+            screen: screen.visibleFrame, scale: Double(petWidth) / 462, params: params,
+            duration: Double(clip.frames.count * clip.frameMs) / 1000, mirrored: model.mirrored, roll: Double.random(in: 0..<1))
+    }
+
+    private func startMotion(_ plan: AnimationMotion, clip: String) {
+        motion = plan
+        motionClip = clip
+        motionStartedMs = Self.nowMs()
+    }
+
+    private func playAmbient(_ choice: AnimationRules.Choice) {
+        guard model.baseState == "IDLE", model.overlayClipName == nil, model.pulseState == nil else { return }
+        if choice.kind == "move" {
+            guard let plan = plannedMotion(for: choice.clip) else {
+                // Moving is unavailable near an edge; choose a stationary action.
+                if let fallback = model.rules.choose(roll: 0.999999, categoryRoll: Double.random(in: 0..<1),
+                    actionRoll: Double.random(in: 0..<1), mirrored: model.mirrored, fixed: true) { _ = model.playAmbient(fallback) }
+                return
+            }
+            guard model.playAmbient(choice) else { return }
+            startMotion(plan, clip: choice.clip)
+        } else { _ = model.playAmbient(choice) }
+    }
+
+    private func stopMotion() {
+        if motion != nil { saveLayout() }
+        motion = nil
+        motionClip = nil
+    }
+
+    private func tick() { advancePlayback(nowMs: Self.nowMs()) }
+
+    func advancePlayback(nowMs now: Int) {
         let elapsed = max(0, now - lastTickMs)
         lastTickMs = now
         let hadPulse = model.pulseState != nil
         let previousFrame = model.frame
         let previousClip = model.activeClipName
+        if let plan = motion, motionClip == model.overlayClipName, !dragging, !reducedMotion, randomAnimations {
+            let position = plan.position(at: Double(now - motionStartedMs) / 1000)
+            moveToPet(position.x, position.y)
+        } else if motion != nil { stopMotion() }
+        if reducedMotion, let deadline = manualDeadlineMs, now >= deadline, model.overlayPurpose == .manual {
+            model.clearOverlay()
+            manualDeadlineMs = nil
+        }
         let modelElapsed = reducedMotion ? 0 : elapsed
         model.advance(elapsedMs: modelElapsed, nowMs: now)
         syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
+        if motion != nil && motionClip != model.overlayClipName { stopMotion() }
         if hadPulse && model.pulseState == nil {
             displayState = model.baseState
         }
@@ -484,6 +543,8 @@ final class PetController: NSObject {
     // MARK: - Interaction
 
     func beginDrag() {
+        stopMotion()
+        manualDeadlineMs = nil
         guard !dragging else { return }
         dragging = true
         // Let the panel follow the pointer onto another display's Space while the
@@ -504,12 +565,12 @@ final class PetController: NSObject {
         // `dragging` is a dangling loop: keep it advancing while the pointer
         // moves the window, otherwise the pet sits on its first frame and looks
         // frozen. Reduced motion keeps the previous frozen behaviour.
-        guard model.playOverlay("dragging") else {
+        guard model.playDrag() else {
             animTimer?.invalidate()
             contentView?.needsDisplay = true
             return
         }
-        if reducedMotion || !model.activeClip.loop {
+        if reducedMotion {
             animTimer?.invalidate()
         } else {
             restartAnimTimer()
@@ -531,7 +592,7 @@ final class PetController: NSObject {
         guard dragging else { return }
         let now = Self.nowMs()
         model.advance(elapsedMs: 0, nowMs: now)
-        if reducedMotion || !model.playOverlay("dragging_release") { model.clearOverlay() }
+        if reducedMotion || !model.playDrag(release: true) { model.clearOverlay() }
         fadeFromFrame = nil
         dragging = false
         // Back to every Space / above full-screen apps once the pointer is released.
@@ -547,11 +608,15 @@ final class PetController: NSObject {
     }
 
     func handleClick(at point: NSPoint, clickCount: Int) {
+        if let clip = AnimationRules.pick(model.rules.clicks, roll: Double.random(in: 0..<1), avoiding: model.activeClipName) {
+            playInteraction(clip, message: "我在这里陪着你呢~")
+            return
+        }
         if clickCount >= 2 {
             playInteraction("head_pat", message: "好啦好啦，知道你喜欢我~")
             return
         }
-        let rect = petRect()
+        let rect = interactionRect()
         let relativeX = max(0, point.x - rect.minX)
         let relativeY = max(0, point.y - rect.minY)
         if relativeY < rect.height * 0.45 {
@@ -568,6 +633,7 @@ final class PetController: NSObject {
         let previousFrame = model.frame
         let previousClip = model.activeClipName
         guard reducedMotion || model.playInteraction(clipName, nowMs: Self.nowMs()) else { return }
+        stopMotion()
         syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
         showOverlay(message, statusDetail, statusState, 1800)
         scheduleMicro()
@@ -577,6 +643,7 @@ final class PetController: NSObject {
     func showMenu(with event: NSEvent) {
         guard let contentView = contentView else { return }
         let menu = NSMenu(title: "DSH 大肥鱼")
+        addAnimationMenu(to: menu)
 
         let sizeMenu = NSMenu(title: "大小")
         for (label, value) in [("迷你", 0.6), ("小", 0.8), ("标准", 1.0), ("大", 1.25)] {
@@ -633,6 +700,89 @@ final class PetController: NSObject {
         NSMenu.popUpContextMenu(menu, with: event, for: contentView)
     }
 
+    /// Canonical library entries are shown once, even when referenced by
+    /// several pools or semantic status aliases.
+    func animationGroups() -> [(String, [String])] {
+        let library = Set(manifest["libraryClips"] as? [String] ?? Array(model.clips.keys))
+        var seen = Set<String>()
+        var groups: [(String, [String])] = []
+        func add(_ title: String, _ names: [String]) {
+            let unique = names.filter { library.contains($0) && model.clips[$0] != nil && seen.insert($0).inserted }
+            if !unique.isEmpty { groups.append((title, unique)) }
+        }
+        add("待机", model.rules.idle)
+        add("转身", model.rules.turn)
+        add("移动", model.rules.moves)
+        add("点击回应", model.rules.clicks)
+        add("拖动", model.rules.drag)
+        for category in model.rules.categories { add(category.id, category.actions) }
+        for key in model.rules.events.keys.sorted() {
+            add(["balance": "额度", "workStatus": "工作状态", "whisper": "碎碎念"][key] ?? key,
+                model.rules.events[key, default: []].flatMap { $0 })
+        }
+        add("其他动作", library.sorted())
+        return groups
+    }
+
+    private func addAnimationMenu(to menu: NSMenu) {
+        let submenu = NSMenu(title: "播放动作")
+        submenu.autoenablesItems = false
+        let labels = manifest["clipLabels"] as? [String: String] ?? [:]
+        for (title, clips) in animationGroups() {
+            let category = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let actions = NSMenu(title: title)
+            actions.autoenablesItems = false
+            for clip in clips {
+                let item = NSMenuItem(title: labels[clip] ?? clip, action: #selector(playSelectedAnimation(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = clip
+                item.isEnabled = !dragging && model.pulseState == nil && model.baseState != "WAITING"
+                actions.addItem(item)
+            }
+            category.submenu = actions
+            submenu.addItem(category)
+        }
+        let item = NSMenuItem(title: "播放动作", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        menu.addItem(item)
+        menu.addItem(.separator())
+    }
+
+    @objc private func playSelectedAnimation(_ sender: NSMenuItem) {
+        if let clip = sender.representedObject as? String { playManual(clip) }
+    }
+
+    private func playManual(_ clip: String) {
+        let previousFrame = model.frame
+        let previousClip = model.activeClipName
+        guard model.playManual(clip) else { return }
+        stopMotion()
+        if !reducedMotion, randomAnimations, let plan = plannedMotion(for: clip) { startMotion(plan, clip: clip) }
+        manualDeadlineMs = Self.nowMs() + model.overlayRemainingMs
+        syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
+        lastTickMs = Self.nowMs()
+        scheduleMicro()
+        contentView?.needsDisplay = true
+    }
+
+    private func isUnmirroredClip(_ clip: String) -> Bool {
+        model.rules.categories.contains { $0.noMirror && $0.actions.contains(clip) }
+    }
+
+    private func handleBalanceAnimation(_ message: [String: Any]) {
+        guard !reducedMotion, message["status"] as? String == "ready",
+              let windows = message["windows"] as? [[String: Any]],
+              let used = windows.compactMap({ Self.doubleValue($0["usedPercent"]) }).filter({ AnimationRules.balanceBand(usedPercent: $0) != nil }).max(),
+              let band = AnimationRules.balanceBand(usedPercent: used) else { return }
+        let now = Self.nowMs()
+        let refresh = (manifest["eventsRefreshSec"] as? [String: Any]).flatMap { Self.doubleValue($0["balance"]) } ?? 1800
+        let interval = Int(min(86400, max(1, refresh.isFinite ? refresh : 1800)) * 1000)
+        if let previous = lastBalanceAnimationMs, now - previous < interval { return }
+        guard model.playEvent("balance", band: band, roll: Double.random(in: 0..<1)) else { return }
+        lastBalanceAnimationMs = now
+        scheduleMicro()
+    }
+
     @objc private func changeSize(_ sender: NSMenuItem) {
         scale = Self.clampedScale(Double(sender.tag) / 100.0)
         resizeAndReposition()
@@ -649,6 +799,7 @@ final class PetController: NSObject {
 
     private func setReducedMotion(_ enabled: Bool) {
         reducedMotion = enabled
+        if enabled { stopMotion() }
         restartAnimTimer()
         if enabled {
             microTimer?.invalidate()
@@ -710,7 +861,10 @@ final class PetController: NSObject {
             contentView?.needsDisplay = true
         case "config":
             applyConfig(message)
+        case "play":
+            if let clip = message["clip"] as? String { playManual(clip) }
         case "balance":
+            handleBalanceAnimation(message)
             balanceSummary = String((message["summary"] as? String ?? "").prefix(200))
             resizeAndReposition()
             contentView?.needsDisplay = true
@@ -722,6 +876,7 @@ final class PetController: NSObject {
             break
         }
         syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
+        if motion != nil && motionClip != model.overlayClipName { stopMotion() }
         if previousState != model.baseState { scheduleMicro() }
         maybeSaveSnapshot()
     }
@@ -786,6 +941,14 @@ final class PetController: NSObject {
     }
 
     private func applyConfig(_ message: [String: Any]) {
+        if let enabled = message["randomAnimations"] as? Bool, enabled != randomAnimations {
+            randomAnimations = enabled
+            if !enabled {
+                microTimer?.invalidate()
+                stopMotion()
+                if model.overlayPurpose == .decoration { model.clearOverlay() }
+            } else { scheduleMicro() }
+        }
         if let url = message["openUrl"] as? String { webuiURL = url }
         if let label = message["openLabel"] as? String { openLabel = label }
         var changed = false
@@ -971,7 +1134,7 @@ final class PetController: NSObject {
             // does not compensate for a flipped context, which would render
             // the pet vertically mirrored. Mirror about the image's own
             // center so it draws right-side up while staying in place.
-            ctx.scaleBy(x: 1, y: -1)
+            ctx.scaleBy(x: model.mirrored && !isUnmirroredClip(model.activeClipName) ? -1 : 1, y: -1)
             img.draw(
                 in: NSRect(x: -drawWidth / 2, y: -drawHeight / 2, width: drawWidth, height: drawHeight),
                 from: NSRect(origin: .zero, size: img.size),

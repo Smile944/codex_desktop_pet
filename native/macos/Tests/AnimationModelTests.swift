@@ -187,4 +187,118 @@ final class AnimationModelTests: XCTestCase {
         XCTAssertLessThan(model.frameIndex, model.activeClip.frames.count)
         XCTAssertLessThan(model.frameElapsedMs, model.activeClip.frameMs)
     }
+    private func customManifest() -> [String: Any] {
+        let clips: [String: Any] = [
+            "customIdle": ["frames": ["i0", "i1"], "frameMs": 10, "loop": true],
+            "customClick": ["frames": ["c0", "c1"], "frameMs": 10, "loop": false],
+            "customWork": ["frames": ["w0", "w1"], "frameMs": 10, "loop": true],
+        ]
+        return ["clips": clips, "animations": ["idle": ["customIdle"], "clicks": ["customClick"],
+                "drag": ["customClick"], "events": ["workStatus": ["customWork", "customWork", "customWork", "customWork", "customWork", "customWork"]]]]
+    }
+
+    func testCustomPackUsesItsOwnIdleWithoutLegacyAliases() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertEqual(model.activeClipName, "customIdle")
+        XCTAssertEqual(model.frame, "i0")
+    }
+
+    func testCustomClickPoolIsRecognizedAsInteraction() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertTrue(model.playInteraction("customClick", nowMs: 0))
+        model.advance(elapsedMs: 20, nowMs: 20)
+        XCTAssertEqual(model.activeClipName, "customIdle")
+    }
+
+    func testManualLoopingClipPlaysOnceAndResumesNewestState() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertTrue(model.playManual("customIdle"))
+        model.applyState("WORKING")
+        XCTAssertEqual(model.activeClipName, "customIdle")
+        model.advance(elapsedMs: 20, nowMs: 20)
+        XCTAssertEqual(model.activeClipName, "customWork")
+        XCTAssertNil(model.overlayClipName)
+    }
+
+    func testManualReplaysSameClipAndUrgentStateInterruptsIt() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertTrue(model.playManual("customIdle"))
+        model.advance(elapsedMs: 10, nowMs: 10)
+        XCTAssertTrue(model.playManual("customIdle"))
+        XCTAssertEqual(model.frameIndex, 0)
+        model.applyState("WAITING")
+        XCTAssertNil(model.overlayClipName)
+        XCTAssertEqual(model.activeClipName, "customWork")
+    }
+
+    func testManualCannotStealDragOrApprovalPulse() {
+        let model = makeModel()
+        XCTAssertTrue(model.playOverlay("dragging"))
+        XCTAssertFalse(model.playManual("idle"))
+        model.clearOverlay()
+        model.applyPulse(state: "WAITING", ttlMs: 1000, nowMs: 0, resumeState: "IDLE", resumeActivity: nil)
+        XCTAssertFalse(model.playManual("idle"))
+    }
+
+    func testEventCandidatesAvoidConsecutiveRepeats() {
+        var manifest = customManifest()
+        var animations = manifest["animations"] as! [String: Any]
+        animations["events"] = ["balance": [["customClick", "customWork"]]]
+        manifest["animations"] = animations
+        let model = AnimationModel(manifest: manifest)
+        XCTAssertTrue(model.playEvent("balance", band: 0, roll: 0))
+        XCTAssertEqual(model.activeClipName, "customClick")
+        model.advance(elapsedMs: 20, nowMs: 20)
+        XCTAssertTrue(model.playEvent("balance", band: 0, roll: 0))
+        XCTAssertEqual(model.activeClipName, "customWork")
+    }
+
+    func testAmbientTurnFlipsOnlyAfterCompletionAndWorkCancelsIt() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertTrue(model.playAmbient(AnimationRules.Choice(kind: "turn", clip: "customClick")))
+        model.advance(elapsedMs: 10, nowMs: 10)
+        XCTAssertFalse(model.mirrored)
+        model.advance(elapsedMs: 10, nowMs: 20)
+        XCTAssertTrue(model.mirrored)
+        XCTAssertTrue(model.playAmbient(AnimationRules.Choice(kind: "turn", clip: "customClick")))
+        model.applyState("WORKING")
+        model.advance(elapsedMs: 100, nowMs: 120)
+        XCTAssertTrue(model.mirrored)
+    }
+
+    func testDifferentUrgentPulseReplacesPreviousPulseClip() {
+        let model = makeModel()
+        model.applyPulse(state: "SUCCESS", ttlMs: 1000, nowMs: 0, resumeState: "IDLE", resumeActivity: nil)
+        model.applyPulse(state: "ERROR", ttlMs: 1000, nowMs: 100, resumeState: "IDLE", resumeActivity: nil)
+        XCTAssertEqual(model.activeClipName, "error")
+        XCTAssertEqual(model.pulseState, "ERROR")
+    }
+
+    func testManualOfBaseClipResetsItsLoopAtCompletion() {
+        let model = AnimationModel(manifest: customManifest())
+        XCTAssertTrue(model.playManual("customIdle"))
+        model.advance(elapsedMs: 10, nowMs: 10)
+        XCTAssertEqual(model.frameIndex, 1)
+        model.advance(elapsedMs: 10, nowMs: 20)
+        XCTAssertNil(model.overlayClipName)
+        XCTAssertEqual(model.frameIndex, 0)
+    }
+
+    func testIdleOnlyPoolAlternatesAfterReturningToBasePose() {
+        let model = AnimationModel(manifest: ["clips": [
+            "a": ["frames": ["a.webp"], "frameMs": 10, "loop": true],
+            "b": ["frames": ["b.webp"], "frameMs": 10, "loop": true]],
+            "stateMap": ["IDLE": "a"], "animations": ["idle": ["a", "b"]]])
+        let first = model.nextAmbient(roll: 0, categoryRoll: 0, actionRoll: 0)!
+        XCTAssertEqual(first.clip, "b")
+        XCTAssertTrue(model.playAmbient(first))
+        model.advance(elapsedMs: 20, nowMs: 20)
+        XCTAssertEqual(model.activeClipName, "a")
+        let second = model.nextAmbient(roll: 0, categoryRoll: 0, actionRoll: 0)!
+        XCTAssertEqual(second.clip, "a")
+        XCTAssertTrue(model.playAmbient(second))
+        model.advance(elapsedMs: 20, nowMs: 40)
+        XCTAssertEqual(model.nextAmbient(roll: 0, categoryRoll: 0, actionRoll: 0)?.clip, "b")
+    }
+
 }

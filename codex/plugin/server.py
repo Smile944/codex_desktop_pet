@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -13,7 +14,7 @@ BASE = Path(__file__).resolve().parent
 RESOURCES = Path.home() / 'Applications/大肥鱼 · Codex.app/Contents/Resources'
 DATA = Path.home() / 'Library/Application Support/Codex BigFish'
 UI_URI = 'ui://codex-bigfish/companion'
-VERSION = '0.5.2'
+VERSION = '0.6.0'
 SETTINGS_CAPABILITY = {'readTool':'settings_read','updateTool':'settings_update'}
 SETTINGS_FIELDS = {
     'enabled':{'type':'boolean','title':'启用大肥鱼'},
@@ -63,35 +64,51 @@ def tool_definitions():
             tool('set_config','修改大肥鱼设置',{'patch':{'type':'object'}},write=True),
             tool('get_status','读取任务状态',{'after':{'type':'integer','minimum':0}}),
             tool('get_usage','读取 Codex 额度',{'force':{'type':'boolean'}}),
+            tool('get_packs','读取角色包和动画库'),
+            tool('select_pack','切换角色包',{'id':{'type':'string'}},write=True),
+            tool('import_pack','导入本地 ZIP 或上游配置',{'path':{'type':'string'}},write=True),
+            tool('play_clip','点播动画',{'clip':{'type':'string'}},write=True),
             tool('get_manifest','读取原版动画清单'),
             tool('get_frames','读取原版动画帧',{'clip':{'type':'string'},'offset':{'type':'integer','minimum':0},'count':{'type':'integer','minimum':1,'maximum':64}})]
 
 
-def companion_request(path, method='GET', body=None):
+def companion_open(path, method='GET', body=None):
     endpoint = json.loads((DATA/'endpoint.json').read_text())
     url = urllib.parse.urlsplit(endpoint['url'])
     if url.scheme!='http' or url.hostname!='127.0.0.1' or url.username or url.password or not url.port or url.path:
         raise ValueError('invalid companion endpoint')
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(endpoint['url']+path,data=data,method=method,headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=20) as response:
+    try:
+        return urllib.request.urlopen(req,timeout=660 if isinstance(body,dict) and body.get('action')=='import' else 20)
+    except urllib.error.HTTPError as error:
+        try:
+            detail=json.load(error).get('error','本地伴侣请求失败')
+        except (ValueError,AttributeError):
+            detail='本地伴侣请求失败'
+        raise ValueError(detail) from error
+
+
+def companion_request(path, method='GET', body=None):
+    with companion_open(path, method, body) as response:
         return json.load(response)
+
+
+def companion_bytes(path):
+    with companion_open(path) as response:
+        return response.read()
 
 
 def frame_batch(clip, offset, count):
     if not isinstance(clip,str) or type(offset) is not int or type(count) is not int or offset<0 or not 1<=count<=64:
         raise ValueError('invalid frame batch')
-    manifest = json.loads((RESOURCES/'assets/pet-manifest.json').read_text())
+    manifest = companion_request('/plugins/dsh-dafeiyu/manifest')
     if clip not in manifest['clips']:
         raise ValueError('unknown clip')
     files = manifest['clips'][clip]['frames']
     frames = {}
-    root = (RESOURCES/'assets/pet').resolve()
     for name in files[offset:offset+count]:
-        path = (root/name).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError('invalid frame path')
-        frames[name] = 'data:image/webp;base64,'+base64.b64encode(path.read_bytes()).decode()
+        frames[name] = 'data:image/webp;base64,'+base64.b64encode(companion_bytes('/plugins/dsh-dafeiyu/frame?frame='+urllib.parse.quote(name,safe=''))).decode()
     return {'frames':frames,'total':len(files)}
 
 
@@ -164,8 +181,17 @@ def dispatch(method, params):
             value=companion_request('/snapshot'+('' if after is None else '?after='+str(after)))
         elif name=='get_usage':
             value=companion_request(base+'balance','POST' if args.get('force') is True else 'GET')
+        elif name=='get_packs':
+            value=companion_request(base+'packs')
+        elif name in ('select_pack','import_pack','play_clip'):
+            key={'select_pack':'id','import_pack':'path','play_clip':'clip'}[name]
+            if not isinstance(args.get(key),str) or not args[key].strip():
+                raise ValueError('invalid '+key)
+            body={key:args[key]}
+            if name!='play_clip':body['action']='select' if name=='select_pack' else 'import'
+            value=companion_request(base+('play' if name=='play_clip' else 'packs'),'POST',body)
         elif name=='get_manifest':
-            value=json.loads((RESOURCES/'assets/pet-manifest.json').read_text())
+            value=companion_request(base+'manifest')
         elif name=='get_frames':
             value=frame_batch(args.get('clip'),args.get('offset',0),args.get('count',64))
         else:
@@ -185,8 +211,12 @@ def main():
             try:
                 result=dispatch(request.get('method'),request.get('params') or {})
                 reply={'jsonrpc':'2.0','id':request['id'],'result':result}
-            except (ValueError,TypeError,KeyError,OSError):
-                reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'大肥鱼暂未连接或参数无效，请确认桌面伴侣正在运行。'}}
+            except (ValueError,TypeError,KeyError,OSError) as error:
+                if request.get('method')=='tools/call':
+                    detail=str(error) if isinstance(error,ValueError) else '大肥鱼暂未连接，请确认桌面伴侣正在运行。'
+                    reply={'jsonrpc':'2.0','id':request['id'],'result':{'isError':True,'content':[{'type':'text','text':detail}]}}
+                else:
+                    reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'大肥鱼暂未连接或参数无效，请确认桌面伴侣正在运行。'}}
             print(json.dumps(reply,ensure_ascii=False),flush=True)
         except (ValueError,UnicodeError):
             continue

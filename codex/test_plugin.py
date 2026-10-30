@@ -59,8 +59,9 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn('src="https://', html)
 
     def test_frame_batch_rejects_invalid_clip_and_oversized_batch(self):
-        with self.assertRaises(ValueError):
-            plugin.frame_batch('../private', 0, 5)
+        with patch.object(plugin,'companion_request',return_value={'clips':{}}):
+            with self.assertRaises(ValueError):
+                plugin.frame_batch('../private', 0, 5)
         with self.assertRaises(ValueError):
             plugin.frame_batch('idle', 0, 1000)
 

@@ -1,0 +1,51 @@
+{
+  "formatVersion": 1,
+  "sources": {
+    "ffmpeg": {
+      "version": "7.1",
+      "filename": "ffmpeg-7.1.tar.gz",
+      "directory": "FFmpeg-n7.1",
+      "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n7.1",
+      "sha256": "7ddad2d992bd250a6c56053c26029f7e728bebf0f37f80cf3f8a0e6ec706431a",
+      "license": "LGPL-2.1-or-later"
+    },
+    "libvpx": {
+      "version": "1.14.1",
+      "filename": "libvpx-1.14.1.tar.gz",
+      "directory": "libvpx-1.14.1",
+      "url": "https://codeload.github.com/webmproject/libvpx/tar.gz/refs/tags/v1.14.1",
+      "sha256": "901747254d80a7937c933d03bd7c5d41e8e6c883e0665fadcb172542167c7977",
+      "license": "BSD-3-Clause"
+    },
+    "libwebp": {
+      "version": "1.4.0",
+      "filename": "libwebp-1.4.0.tar.gz",
+      "directory": "libwebp-1.4.0",
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.4.0.tar.gz",
+      "sha256": "61f873ec69e3be1b99535634340d5bde750b2e4447caa1db9f61be3fd49ab1e5",
+      "license": "BSD-3-Clause"
+    }
+  },
+  "binaries": {
+    "arm64": {
+      "sha256": "bf24196c88e3f201dcc7bdb5b324d2cf397a211df3f90b31a1b44657da65388b",
+      "size": 2517472,
+      "license": "LGPL-2.1-or-later",
+      "builtFrom": {
+        "ffmpeg": "7ddad2d992bd250a6c56053c26029f7e728bebf0f37f80cf3f8a0e6ec706431a",
+        "libvpx": "901747254d80a7937c933d03bd7c5d41e8e6c883e0665fadcb172542167c7977",
+        "libwebp": "61f873ec69e3be1b99535634340d5bde750b2e4447caa1db9f61be3fd49ab1e5"
+      }
+    },
+    "x86_64": {
+      "sha256": "2e8052938ae9ea7fd06544da04635a01f886dedcfe7c17287307da01a9c04191",
+      "size": 2861648,
+      "license": "LGPL-2.1-or-later",
+      "builtFrom": {
+        "ffmpeg": "7ddad2d992bd250a6c56053c26029f7e728bebf0f37f80cf3f8a0e6ec706431a",
+        "libvpx": "901747254d80a7937c933d03bd7c5d41e8e6c883e0665fadcb172542167c7977",
+        "libwebp": "61f873ec69e3be1b99535634340d5bde750b2e4447caa1db9f61be3fd49ab1e5"
+      }
+    }
+  }
+}

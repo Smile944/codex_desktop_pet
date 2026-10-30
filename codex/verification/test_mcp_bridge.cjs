@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const assert=require('node:assert/strict');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../plugin/app.js'),'utf8');
 const drain=async()=>{for(let i=0;i<10;i++)await new Promise(setImmediate);};
-function harness({manifestFailures=0,frameFailures=0}={}) {
+function harness({manifestFailures=0,frameFailures=0,frameGate=null}={}) {
   const calls=[];
   const context={Response,document:{body:{style:{}}},setInterval:callback=>{context.tick=callback;}};
   context.window=context;
@@ -18,9 +18,12 @@ function harness({manifestFailures=0,frameFailures=0}={}) {
         return {structuredContent:{clips:{idle:{},search:{}},stateMap:{WORKING:'search'},workingActivityMap:{search:'search'}}};
       }
       if(name==='get_frames') {
+        if(frameGate)await frameGate;
         if(args.clip==='search'&&frameFailures-->0)throw Error('temporary frame failure');
         return {structuredContent:{frames:{[args.clip]:'data:image/webp;base64,AA=='},total:1}};
       }
+      if(name==='get_packs'||name==='select_pack'||name==='import_pack')return {structuredContent:{packs:[{id:'cat'}],selected:'cat',manifest:{clips:{idle:{}}}}};
+      if(name==='play_clip')return {isError:true,content:[{type:'text',text:'unknown clip'}]};
       throw Error('unexpected tool '+name);
     }
   };
@@ -51,5 +54,24 @@ function harness({manifestFailures=0,frameFailures=0}={}) {
     await drain();assert.equal(messages.filter(m=>m.kind==='state').length,0);
     context.tick();await drain();assert.equal(messages.at(-1).state,'WORKING');stream.close();
   }
-  console.log('MCP_BRIDGE_RESULT 3 scenarios passed');
+  {
+    const {context,calls}=harness();
+    await context.fetch('/plugins/dsh-dafeiyu/manifest');
+    assert.ok(context.bigfishFrames.idle);
+    assert.equal((await context.fetch('/plugins/dsh-dafeiyu/packs',{method:'POST',body:JSON.stringify({action:'select',id:'cat'})})).status,200);
+    assert.equal(context.bigfishFrames.idle,undefined);
+    assert.equal(calls.at(-1).name,'select_pack');
+    const failure=await context.fetch('/plugins/dsh-dafeiyu/play',{method:'POST',body:JSON.stringify({clip:'bad'})});
+    assert.equal(failure.status,503);
+    assert.equal((await failure.json()).error,'unknown clip');
+  }
+  {
+    let release;const frameGate=new Promise(resolve=>{release=resolve;});
+    const {context}=harness({frameGate});
+    const old=context.fetch('/plugins/dsh-dafeiyu/manifest');await drain();
+    await context.fetch('/plugins/dsh-dafeiyu/packs',{method:'POST',body:JSON.stringify({action:'select',id:'cat'})});
+    release();await old;
+    assert.equal(context.bigfishFrames.idle,undefined,'in-flight old-pack frames must not repopulate cache');
+  }
+  console.log('MCP_BRIDGE_RESULT 5 scenarios passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

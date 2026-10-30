@@ -27,6 +27,15 @@ final class AnimationModel {
         return 0.10
     }
 
+    enum OverlayPurpose { case decoration, interaction, manual, drag }
+    private(set) var rules: AnimationRules!
+    private(set) var mirrored = false
+    private(set) var overlayPurpose: OverlayPurpose?
+    private var overlayLoop: Bool?
+    private var turnsOnCompletion = false
+    private var lastEvents: [String: String] = [:]
+    private var dragMap: [String: String] = [:]
+
     private(set) var clips: [String: Clip] = [:]
     private var stateMap: [String: String] = [:]
     private var workingActivityMap: [String: String] = [:]
@@ -35,6 +44,7 @@ final class AnimationModel {
     private var interactionCooldownMs = 1200
     private var lastInteractionMs: Int?
     private var lastIdleMicro: String?
+    private var lastAmbientClip: String?
 
     private(set) var baseState = "IDLE"
     private(set) var baseActivity: String?
@@ -51,11 +61,11 @@ final class AnimationModel {
         if let clipsDict = manifest["clips"] as? [String: Any] {
             for (name, value) in clipsDict {
                 guard let v = value as? [String: Any],
-                      let frames = v["frames"] as? [String] else { continue }
+                      let frames = v["frames"] as? [String], !frames.isEmpty else { continue }
                 clips[name] = Clip(
                     name: name,
                     frames: frames,
-                    frameMs: Self.asInt(v["frameMs"], fallback: 180),
+                    frameMs: max(1, Self.asInt(v["frameMs"], fallback: 180)),
                     loop: (v["loop"] as? Bool) ?? false
                 )
             }
@@ -67,7 +77,9 @@ final class AnimationModel {
             "quiet": [45000, 90000], "normal": [25000, 45000], "lively": [12000, 22000],
         ]
         interactionCooldownMs = Self.asInt(manifest["interactionCooldownMs"], fallback: 1200)
-        if let idleClip = stateMap["IDLE"], !idleClip.isEmpty {
+        rules = AnimationRules(manifest: manifest, clipNames: Set(clips.keys))
+        dragMap = manifest["dragMap"] as? [String: String] ?? [:]
+        if let idleClip = stateMap["IDLE"].flatMap({ clips[$0] == nil ? nil : $0 }) ?? rules.idle.first ?? clips.keys.sorted().first {
             baseClipName = idleClip
             activeClipName = idleClip
         }
@@ -81,26 +93,31 @@ final class AnimationModel {
         activeClip.frames.isEmpty ? "" : activeClip.frames[frameIndex]
     }
 
+    private var activeLoops: Bool { overlayClipName == nil ? activeClip.loop : (overlayLoop ?? activeClip.loop) }
+
     var overlayRemainingMs: Int {
-        guard overlayClipName != nil, !activeClip.loop else { return 0 }
+        guard overlayClipName != nil, !activeLoops else { return 0 }
         return (activeClip.frames.count - frameIndex) * activeClip.frameMs - frameElapsedMs
     }
 
     func idleMicroInterval(activityLevel: String) -> ClosedRange<Int> {
         let pair = idleMicroIntervalsMs[activityLevel] ?? idleMicroIntervalsMs["normal"] ?? [25000, 45000]
+        guard pair.count == 2, pair[0] >= 0, pair[1] >= pair[0] else { return 25000...45000 }
         return pair[0]...pair[1]
     }
 
     func applyState(_ state: String, activity: String? = nil) {
         guard Self.states.contains(state) else { return }
+        let repeated = baseState == state && baseActivity == activity
         baseState = state
         baseActivity = activity
-        baseClipName = clip(for: state, activity: activity)
+        if !repeated { baseClipName = clip(for: state, activity: activity) }
         if state != "IDLE" {
             pulseState = nil
             pulseDeadlineMs = nil
             pulseClipName = nil
-            if !Self.dragClips.contains(overlayClipName ?? "") { overlayClipName = nil }
+            let manualContinues = overlayPurpose == .manual && state != "WAITING" && state != "ERROR"
+            if overlayPurpose != .drag && !manualContinues { resetOverlay() }
         }
         if overlayClipName == nil {
             activate(underlayClipName)
@@ -114,13 +131,14 @@ final class AnimationModel {
             baseActivity = resumeActivity
             baseClipName = clip(for: resume, activity: resumeActivity)
         }
-        let previousDeadline = pulseState == state ? pulseDeadlineMs : nil
+        let repeatedPulse = pulseState == state
+        let previousDeadline = repeatedPulse ? pulseDeadlineMs : nil
         pulseState = state
-        pulseClipName = clip(for: state, activity: nil)
+        pulseClipName = repeatedPulse ? (pulseClipName ?? clip(for: state, activity: nil)) : clip(for: state, activity: nil)
         let pulseClip = clips[pulseClipName ?? ""]
         let duration = completeClip ? (pulseClip?.frames.count ?? 0) * (pulseClip?.frameMs ?? 0) : 0
         pulseDeadlineMs = max(nowMs + ttlMs, previousDeadline ?? nowMs + duration)
-        if !Self.dragClips.contains(overlayClipName ?? "") { overlayClipName = nil }
+        if overlayPurpose != .drag { resetOverlay() }
         if overlayClipName == nil {
             activate(pulseClipName ?? baseClipName)
         }
@@ -128,24 +146,79 @@ final class AnimationModel {
 
     @discardableResult
     func playOverlay(_ clipName: String) -> Bool {
+        startOverlay(clipName, purpose: Self.dragClips.contains(clipName) || dragMap.values.contains(clipName) || rules.drag.contains(clipName) ? .drag : .decoration)
+    }
+
+    @discardableResult
+    private func startOverlay(_ clipName: String, purpose: OverlayPurpose, loop: Bool? = nil, restart: Bool = false, turns: Bool = false) -> Bool {
         guard clips[clipName] != nil else { return false }
         overlayClipName = clipName
-        activate(clipName)
+        overlayPurpose = purpose
+        overlayLoop = loop
+        turnsOnCompletion = turns
+        activate(clipName, restart: restart)
         return true
     }
 
     func clearOverlay() {
-        overlayClipName = nil
+        resetOverlay()
         activate(underlayClipName)
+    }
+
+    private func resetOverlay() {
+        overlayClipName = nil
+        overlayPurpose = nil
+        overlayLoop = nil
+        turnsOnCompletion = false
+    }
+
+    @discardableResult
+    func playManual(_ clipName: String) -> Bool {
+        guard overlayPurpose != .drag, pulseState == nil, baseState != "WAITING" else { return false }
+        return startOverlay(clipName, purpose: .manual, loop: false, restart: true, turns: rules.turn.contains(clipName))
+    }
+
+    func nextAmbient(roll: Double, categoryRoll: Double, actionRoll: Double) -> AnimationRules.Choice? {
+        rules.choose(roll: roll, categoryRoll: categoryRoll, actionRoll: actionRoll,
+            mirrored: mirrored, previous: lastAmbientClip ?? activeClipName)
+    }
+
+    @discardableResult
+    func playAmbient(_ choice: AnimationRules.Choice) -> Bool {
+        guard baseState == "IDLE", pulseState == nil, overlayClipName == nil else { return false }
+        guard startOverlay(choice.clip, purpose: .decoration, loop: false, restart: true, turns: choice.kind == "turn") else { return false }
+        lastAmbientClip = choice.clip
+        return true
+    }
+
+    func dragClip(release: Bool = false) -> String? {
+        let key = release ? "release" : "dragging"
+        if let mapped = dragMap[key] ?? dragMap[release ? "dragging_release" : "drag"], clips[mapped] != nil { return mapped }
+        let legacy = release ? "dragging_release" : "dragging"
+        if clips[legacy] != nil { return legacy }
+        return release ? nil : rules.drag.first
+    }
+
+    @discardableResult
+    func playDrag(release: Bool = false) -> Bool {
+        guard let name = dragClip(release: release) else { return false }
+        return startOverlay(name, purpose: .drag, loop: !release, restart: true)
+    }
+
+    @discardableResult
+    func playEvent(_ event: String, band: Int, roll: Double) -> Bool {
+        guard baseState == "IDLE", pulseState == nil, overlayClipName == nil,
+              let name = rules.event(event, band: band, roll: roll, previous: lastEvents["\(event):\(band)"]) else { return false }
+        lastEvents["\(event):\(band)"] = name
+        return startOverlay(name, purpose: .decoration, loop: false, restart: true)
     }
 
     @discardableResult
     func playInteraction(_ clipName: String, nowMs: Int) -> Bool {
-        guard Self.interactionClips.contains(clipName), pulseState == nil else { return false }
-        let current = overlayClipName ?? ""
-        guard !Self.interactionClips.contains(current), !Self.dragClips.contains(current) else { return false }
+        guard (Self.interactionClips.contains(clipName) || rules.clicks.contains(clipName)), pulseState == nil, baseState != "WAITING" else { return false }
+        guard overlayPurpose != .interaction, overlayPurpose != .drag, overlayPurpose != .manual else { return false }
         if let last = lastInteractionMs, nowMs - last < interactionCooldownMs { return false }
-        guard playOverlay(clipName) else { return false }
+        guard startOverlay(clipName, purpose: .interaction, loop: false, restart: true) else { return false }
         lastInteractionMs = nowMs
         return true
     }
@@ -182,11 +255,12 @@ final class AnimationModel {
         frameElapsedMs = total % clip.frameMs
         if nextFrame < clip.frames.count {
             frameIndex = nextFrame
-        } else if clip.loop {
+        } else if activeLoops {
             frameIndex = nextFrame % clip.frames.count
         } else if overlayClipName != nil {
-            overlayClipName = nil
-            activate(underlayClipName)
+            if turnsOnCompletion { mirrored.toggle() }
+            resetOverlay()
+            activate(underlayClipName, restart: true)
         } else {
             frameIndex = clip.frames.count - 1
             frameElapsedMs = 0
@@ -194,18 +268,21 @@ final class AnimationModel {
     }
 
     func clip(for state: String, activity: String?) -> String {
-        if state == "WORKING", let activity = activity, let mapped = workingActivityMap[activity] {
+        if state == "WORKING", let activity = activity, let mapped = workingActivityMap[activity], clips[mapped] != nil {
             return mapped
         }
-        return stateMap[state] ?? stateMap["IDLE"] ?? baseClipName
+        if let mapped = stateMap[state], clips[mapped] != nil { return mapped }
+        let bands = ["THINKING": 0, "WORKING": 1, "WAITING": 3, "SUCCESS": 4, "ERROR": 5]
+        if let band = bands[state], let event = rules.event("workStatus", band: band, roll: 0) { return event }
+        return stateMap["IDLE"].flatMap { clips[$0] == nil ? nil : $0 } ?? rules.idle.first ?? baseClipName
     }
 
     private var underlayClipName: String {
         pulseClipName ?? baseClipName
     }
 
-    private func activate(_ clipName: String) {
-        guard activeClipName != clipName else { return }
+    private func activate(_ clipName: String, restart: Bool = false) {
+        guard restart || activeClipName != clipName else { return }
         activeClipName = clipName
         frameIndex = 0
         frameElapsedMs = 0

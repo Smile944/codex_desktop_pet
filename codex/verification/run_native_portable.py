@@ -57,7 +57,7 @@ def main():
         main_swift = work / 'main.swift'
         main_swift.write_text('\n'.join(runner) + '\n')
         pure_sources = [ROOT / 'native/macos/Sources' / name for name in
-                        ['AnimationModel.swift', 'LayoutStore.swift', 'PetGeometry.swift']]
+                        ['AnimationModel.swift', 'AnimationRules.swift', 'LayoutStore.swift', 'PetGeometry.swift']]
         binary = work / 'portable-tests'
         compile_command = ['/usr/bin/swiftc', '-swift-version', '5', *map(str, pure_sources),
                            str(HERE / 'PortableAssertions.swift'), *tests,

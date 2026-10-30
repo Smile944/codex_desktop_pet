@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import release
 import build
+from unittest.mock import patch
 
 
 class ReleaseTests(unittest.TestCase):
@@ -55,6 +56,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('../Resources/python/bin/python3', launcher)
         self.assertNotIn(__import__('sys').executable, launcher)
         self.assertIn('unset PYTHONHOME PYTHONPATH', launcher)
+
+    def test_installer_signing_preserves_nested_media_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            installer=Path(tmp)/'installer.app'
+            with patch.object(release,'run') as run:
+                release.sign_installer(installer)
+            signing=run.call_args_list[0].args
+            self.assertNotIn('--deep',signing)
+            self.assertIn('--deep',run.call_args_list[1].args)
 
     def test_runtime_locks_have_exact_versions_and_digests(self):
         locks = json.loads((Path(__file__).parent/'runtime-lock.json').read_text())

@@ -11,8 +11,12 @@ let evidence = URL(fileURLWithPath: CommandLine.arguments[3])
 let variant = CommandLine.arguments[4]
 let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("assets/pet-manifest.json"))) as! [String: Any]
 let scratch = evidence.appendingPathComponent("\(variant)-scratch-layout.json")
-func controller() -> PetController {
-    let result = PetController(model: AnimationModel(manifest: manifest), manifest: manifest,
+func controller(using custom: [String: Any]? = nil) -> PetController {
+    // The historical coordinate gesture contract remains covered independently
+    // from manifests that opt into the upstream random click pool.
+    var source = custom ?? manifest
+    if custom == nil { source.removeValue(forKey: "animations") }
+    let result = PetController(model: AnimationModel(manifest: source), manifest: source,
                                assetRoot: root.appendingPathComponent("assets/pet"), layoutURL: scratch,
                                webuiURL: "http://127.0.0.1:1", eventLogURL: nil, snapshotURL: nil)
     result.scale = 1
@@ -35,7 +39,7 @@ let taps: [(String, CGFloat, CGFloat, Int, String)] = [
 ]
 for (name, x, y, count, expected) in taps {
     let c = controller()
-    let rect = c.petRect()
+    let rect = c.interactionRect()
     let point = CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
     XCTAssertTrue(PetGeometry.isInteractive(point, pet: rect, bubble: nil))
     c.handleClick(at: point, clickCount: count)
@@ -49,6 +53,96 @@ for (name, x, y, count, expected) in taps {
     c.model.advance(elapsedMs: 1, nowMs: 0)
     XCTAssertEqual(c.model.activeClipName, "idle")
     print("PASS controller \(name): \(expected), spam suppressed, completion resumes idle")
+}
+
+// New manifests and protocol playback use arbitrary pack-local clip names.
+let packManifest: [String: Any] = ["clips": [
+    "packIdle": ["frames": ["i0", "i1"], "frameMs": 10, "loop": true],
+    "packClick": ["frames": ["c0", "c1"], "frameMs": 10, "loop": false],
+    "packWork": ["frames": ["w0", "w1"], "frameMs": 10, "loop": true]],
+    "animations": ["idle": ["packIdle"], "clicks": ["packClick"], "drag": ["packClick"],
+        "events": ["balance": ["packClick", "packClick", "packClick", "packClick", "packClick", "packClick"],
+                   "workStatus": ["packWork", "packWork", "packWork", "packWork", "packWork", "packWork"]]]]
+let libraryController = controller(using: packManifest)
+libraryController.apply(["kind": "play", "clip": "packIdle"])
+XCTAssertEqual(libraryController.model.overlayClipName, "packIdle")
+libraryController.apply(["kind": "state", "state": "WORKING"])
+libraryController.model.advance(elapsedMs: 20, nowMs: 20)
+XCTAssertEqual(libraryController.model.activeClipName, "packWork")
+libraryController.apply(["kind": "state", "state": "IDLE"])
+libraryController.handleClick(at: libraryController.petRect().origin, clickCount: 1)
+XCTAssertEqual(libraryController.model.activeClipName, "packClick")
+libraryController.model.clearOverlay()
+libraryController.apply(["kind": "balance", "status": "ready", "windows": [["usedPercent": 60.0]]])
+XCTAssertEqual(libraryController.model.activeClipName, "packClick")
+libraryController.model.clearOverlay()
+libraryController.apply(["kind": "play", "clip": "packIdle"])
+libraryController.apply(["kind": "config", "randomAnimations": false])
+XCTAssertEqual(libraryController.model.overlayClipName, "packIdle")
+libraryController.beginDrag()
+XCTAssertEqual(libraryController.model.activeClipName, "packClick")
+libraryController.endDrag()
+XCTAssertEqual(libraryController.model.activeClipName, "packIdle")
+
+let groups = libraryController.animationGroups().flatMap { $0.1 }
+XCTAssertEqual(Set(groups), Set(["packIdle", "packClick", "packWork"]))
+XCTAssertEqual(groups.count, 3)
+libraryController.reducedMotion = true
+libraryController.apply(["kind": "play", "clip": "packClick"])
+libraryController.advancePlayback(nowMs: Int(Date().timeIntervalSince1970 * 1000) + 1000)
+XCTAssertNil(libraryController.model.overlayClipName)
+
+libraryController.apply(["kind": "balance", "status": "ready", "windows": [["usedPercent": 80.0]]])
+XCTAssertNil(libraryController.model.overlayClipName)
+var contentManifest = packManifest
+contentManifest["maxFrameWidth"] = 640
+contentManifest["maxFrameHeight"] = 360
+contentManifest["contentRect"] = [100, 0, 412, 344]
+let contentController = controller(using: contentManifest)
+XCTAssertEqual(contentController.petRect().width, 640)
+XCTAssertEqual(contentController.interactionRect().width, 412)
+XCTAssertEqual(contentController.interactionRect().minX - contentController.petRect().minX, 100)
+
+// Independent temporary files prove first access, eviction, package isolation
+// and traversal rejection without depending on NSCache's advisory limits.
+let frameDirectory = evidence.appendingPathComponent("frame-cache-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: frameDirectory, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: frameDirectory) }
+let sampleName = (manifest["clips"] as! [String: [String: Any]])["idle"]!["frames"] as! [String]
+let sampleData = try Data(contentsOf: root.appendingPathComponent("assets/pet").appendingPathComponent(sampleName[0]))
+let store = FrameStore(root: frameDirectory, frames: ["1.webp", "2.webp", "3.webp", "../escape.webp"], countLimit: 2)
+XCTAssertEqual(store.residentFrameCount, 0)
+XCTAssertNil(store.image(for: "1.webp"))
+for index in 1...3 { try sampleData.write(to: frameDirectory.appendingPathComponent("\(index).webp")) }
+XCTAssertTrue(store.image(for: "1.webp") != nil)
+XCTAssertTrue(store.image(for: "2.webp") != nil)
+XCTAssertTrue(store.image(for: "1.webp") != nil)
+XCTAssertTrue(store.image(for: "3.webp") != nil)
+XCTAssertEqual(store.residentFrameCount, 2)
+try FileManager.default.removeItem(at: frameDirectory.appendingPathComponent("2.webp"))
+XCTAssertNil(store.image(for: "2.webp"))
+XCTAssertNil(store.image(for: "../escape.webp"))
+let isolated = FrameStore(root: frameDirectory.appendingPathComponent("missing-pack"), frames: ["1.webp"])
+XCTAssertNil(isolated.image(for: "1.webp"))
+let tiny = FrameStore(root: frameDirectory, frames: ["1.webp"], byteLimit: 1)
+XCTAssertTrue(tiny.image(for: "1.webp") != nil)
+XCTAssertEqual(tiny.residentFrameCount, 0)
+
+// Exercise every shipped canonical entry through the actual play protocol.
+let shipped = controller(using: manifest)
+let shippedGroups = shipped.animationGroups().flatMap { $0.1 }
+XCTAssertEqual(shippedGroups.count, 106)
+XCTAssertEqual(Set(shippedGroups).count, 106)
+XCTAssertEqual(shipped.model.rules.clicks.count, 5)
+shipped.apply(["kind": "state", "state": "WORKING", "activity": "editing"])
+for clip in shippedGroups {
+    shipped.apply(["kind": "play", "clip": clip])
+    XCTAssertEqual(shipped.model.activeClipName, clip)
+    let duration = shipped.model.overlayRemainingMs
+    XCTAssertGreaterThanOrEqual(duration, 1)
+    shipped.model.advance(elapsedMs: duration, nowMs: 0)
+    XCTAssertNil(shipped.model.overlayClipName)
+    XCTAssertEqual(shipped.model.activeClipName, "working")
 }
 
 // Model geometry only: these rectangles represent displays, not actual hardware.

@@ -6,7 +6,12 @@ def client_source(resources, ui_root):
     code = adapt_client_scale((resources / 'lib/client.js').read_text())
     start = code.index('  function BalancePanel(')
     end = code.index('  function BigFishCard(', start)
-    code = code[:start] + (ui_root / 'usage-panel.js').read_text() + code[end:]
+    code = code[:start] + (ui_root / 'usage-panel.js').read_text() + (ui_root / 'animation-panel.js').read_text() + code[end:]
+    code = code.replace("          busy ? React.createElement('small'", "          React.createElement(AnimationPanel, {value, writable, write}),\n          busy ? React.createElement('small'")
+    code = code.replace("    const [src, setSrc] = useState(null)", "    const [src, setSrc] = useState(null)\n    const [packRevision, setPackRevision] = useState(0)\n    const selectedPack = useRef(null)")
+    code = code.replace("                  const message = JSON.parse(event.data)", "                  const message = JSON.parse(event.data)\n                  if (message.kind === 'pack' && selectedPack.current !== message.selected) {selectedPack.current = message.selected;setSrc(null);setPackRevision(n => n + 1);return}")
+    code = code.replace("    }, [])\n    if (!src)", "    }, [packRevision])\n    if (!src)")
+    code = code.replace("manifest.clips[name] || manifest.clips.idle", "manifest.clips[name] || manifest.clips[manifest.stateMap?.IDLE] || Object.values(manifest.clips)[0]")
     for old, new in [
         ('DSH WebUI 或桌面端', 'Codex 桌面端'), ('DSH Host', 'Codex 伴侣'),
         ('DSH 页面', '本设置页面'), ('打开 DSH', '打开 Codex'),

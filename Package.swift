@@ -16,10 +16,11 @@ let package = Package(
             exclude: [
                 "Permissions.swift",
                 "PetController.swift",
+                "FrameStore.swift",
                 "PetView.swift",
                 "main.swift",
             ],
-            sources: ["AnimationModel.swift", "LayoutStore.swift", "PetGeometry.swift"]
+            sources: ["AnimationModel.swift", "AnimationRules.swift", "LayoutStore.swift", "PetGeometry.swift"]
         ),
         .testTarget(
             name: "BigFishCoreTests",

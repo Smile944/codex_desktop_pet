@@ -4,12 +4,14 @@ import argparse
 import json
 import os
 import plistlib
+import platform
 import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from scale_policy import adapt_native_scale
+from media_runtime import ensure_media
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / 'codex/dist/大肥鱼 · Codex.app'
@@ -23,6 +25,16 @@ def launcher_script(embedded=False):
     python = '"$(dirname "$0")/../Resources/python/bin/python3"' if embedded else shlex.quote(sys.executable)
     return ('#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec ' + python +
             ' -E -s -B "$(dirname "$0")/../Resources/codex/launcher.py"\n')
+
+
+def bundle_media(resources, arch):
+    binary = ensure_media(arch)
+    target = resources / 'media'
+    target.mkdir()
+    shutil.copy2(binary, target / 'ffmpeg')
+    (resources / 'codex').mkdir(exist_ok=True)
+    shutil.copy2(ROOT / 'codex/media-lock.json', resources / 'codex/media-lock.json')
+    shutil.copytree(ROOT / 'codex/media-licenses', target / 'licenses')
 
 
 def build(app=APP, runtime=None, arch=None):
@@ -40,10 +52,11 @@ def build(app=APP, runtime=None, arch=None):
     code = resources / 'codex'
     code.mkdir()
     for name in ('host.py', 'adapter.py', 'launcher.py', 'usage.py', 'scale_policy.py', 'client_bundle.py', 'runtime_status.py',
-                 'install.py', 'install_plugin.py', 'portable_install.py', 'permission_hooks.py', 'install_hooks.py'):
+                 'install.py', 'install_plugin.py', 'portable_install.py', 'permission_hooks.py', 'install_hooks.py', 'pet_packs.py', 'media_runtime.py'):
         shutil.copy2(ROOT / 'codex' / name, code / name)
     for name in ('ui', 'vendor', 'plugin'):
         shutil.copytree(ROOT / 'codex' / name, code / name)
+    bundle_media(resources, arch or platform.machine())
     version = json.loads((ROOT / 'codex/plugin/plugin.json').read_text())['version']
     if runtime:
         shutil.copytree(runtime, resources / 'python', symlinks=True)
@@ -98,7 +111,7 @@ def build(app=APP, runtime=None, arch=None):
                 magic = stream.read(4)
             if magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe'):
                 run('/usr/bin/codesign', '--force', '--sign', '-', '--timestamp=none', str(path))
-    run('/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', str(app))
+    run('/usr/bin/codesign', '--force', '--sign', '-', '--timestamp=none', str(app))
     run('/usr/bin/codesign', '--verify', '--deep', '--strict', str(app))
     print(json.dumps(dict(app=str(app), identicalAssets=len(digests), embeddedRuntime=bool(runtime)), ensure_ascii=False))
 

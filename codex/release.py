@@ -42,6 +42,13 @@ def run(*args):
     subprocess.run([str(arg) for arg in args], check=True)
 
 
+def sign_installer(installer):
+    # Nested payload/helper/runtime/media already carry their own signatures.
+    # Recursive re-signing changes ffmpeg bytes and invalidates its pinned digest.
+    run('/usr/bin/codesign', '--force', '--sign', '-', '--timestamp=none', installer)
+    run('/usr/bin/codesign', '--verify', '--deep', '--strict', installer)
+
+
 def build_release(arch):
     notices = ROOT/'codex/runtime-licenses'
     provenance = json.loads((notices/'PROVENANCE.json').read_text())
@@ -78,8 +85,7 @@ def build_release(arch):
         CFBundleDisplayName='安装大肥鱼 · Codex', CFBundleExecutable='install', CFBundlePackageType='APPL',
         CFBundleVersion=version, CFBundleShortVersionString=version, LSMinimumSystemVersion='13.0',
         NSHighResolutionCapable=True)))
-    run('/usr/bin/codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', installer)
-    run('/usr/bin/codesign', '--verify', '--deep', '--strict', installer)
+    sign_installer(installer)
     shutil.copy2(ROOT/'codex/INSTALL-RELEASE.txt', volume/'安装说明.txt')
     shutil.copy2(ROOT/'LICENSE', volume/'LICENSE.txt')
     uninstall = volume/'卸载桌宠.command'

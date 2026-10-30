@@ -6,6 +6,7 @@ import math
 import mimetypes
 import os
 import queue
+import re
 import signal
 import socket
 import subprocess
@@ -26,13 +27,16 @@ from scale_policy import MIN_SCALE, MAX_SCALE, normalize_saved_scale
 from client_bundle import client_source
 from runtime_status import read_runtime_status
 from permission_hooks import pending_threads, apply_pending
+from pet_packs import PackStore
+from media_runtime import resolve_ffmpeg
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('CODEX_BIGFISH_HOME', Path.home() / 'Library/Application Support/Codex BigFish'))
 DEFAULTS = dict(enabled=True, scale=1, bubbleScale=1, activityLevel='normal', reducedMotion=False,
                 soundEnabled=True, soundStates=['SUCCESS', 'ERROR'], bubbleMode='always',
                 bubbleStates=['SUCCESS', 'ERROR', 'WAITING'], includeSubagents=False,
-                webOverlay=False, clientTarget='auto', balanceEnabled=True, balanceSource='auto')
+                webOverlay=False, clientTarget='auto', balanceEnabled=True, balanceSource='auto',
+                randomAnimations=True, petPack='builtin')
 
 
 def validated(patch):
@@ -41,6 +45,8 @@ def validated(patch):
     for k, v in patch.items():
         if isinstance(DEFAULTS[k], bool):
             ok = isinstance(v, bool)
+        elif k == 'petPack':
+            ok = isinstance(v, str) and bool(re.fullmatch(r'[A-Za-z0-9_-]{1,80}', v))
         elif k in ('scale', 'bubbleScale'):
             lo, hi = (MIN_SCALE, MAX_SCALE) if k == 'scale' else (0.8, 1.2)
             ok = type(v) in (int, float) and math.isfinite(v) and lo <= v <= hi
@@ -99,9 +105,20 @@ class Host:
     def __init__(self, resources, helper, port=0, standalone=False, snapshot=None, request_timeout=5):
         self.resources, self.helper_path = Path(resources), Path(helper)
         self.assets = self.resources / 'assets'
+        self.store = ConfigStore(DATA / 'settings.json')
+        try:
+            ffmpeg = resolve_ffmpeg(self.resources)
+        except (OSError, ValueError):
+            ffmpeg = None
+        self.pack_store = PackStore(self.assets, DATA, ffmpeg=ffmpeg)
+        try:
+            self.assets = self.pack_store.resolve(self.store.value['petPack'])
+        except (OSError, ValueError):
+            self.assets = self.pack_store.resolve('builtin')
+            self.store.update({'petPack': 'builtin'})
         self.manifest = json.loads((self.assets / 'pet-manifest.json').read_text())
         self.frames = {f for c in self.manifest['clips'].values() for f in c['frames']}
-        self.store = ConfigStore(DATA / 'settings.json')
+        self.import_lock = threading.Lock()
         self.registry, self.tail = SessionRegistry(), LogTail()
         self.lock = threading.RLock()
         self.clients = set()
@@ -169,6 +186,8 @@ class Host:
                 try:
                     if path == endpoint + 'config':
                         return self.reply(owner.store.value)
+                    if path == endpoint + 'packs':
+                        return self.reply(owner.pack_snapshot())
                     if path == endpoint + 'manifest':
                         return self.reply(owner.manifest)
                     if path == endpoint + 'balance':
@@ -189,8 +208,10 @@ class Host:
                         return self.reply(owner.event_snapshot(after))
                     if path == endpoint + 'frame':
                         name = urllib.parse.parse_qs(url.query).get('frame', [''])[0]
-                        frame = frame_path(owner.assets, owner.frames, name)
-                        return self.reply(frame.read_bytes(), content_type='image/webp')
+                        with owner.lock:
+                            frame = frame_path(owner.assets, owner.frames, name)
+                            payload = frame.read_bytes()
+                        return self.reply(payload, content_type='image/webp')
                     if path == endpoint + 'events':
                         return self.stream()
                     files = {'/': BASE / 'ui/index.html', '/wrapper.js': BASE / 'ui/wrapper.js',
@@ -214,14 +235,46 @@ class Host:
                 if path == '/plugins/dsh-dafeiyu/balance':
                     owner.refresh_balance(force=True)
                     return self.reply(owner.balance)
-                if path != '/plugins/dsh-dafeiyu/config':
+                if path not in ('/plugins/dsh-dafeiyu/config', '/plugins/dsh-dafeiyu/packs', '/plugins/dsh-dafeiyu/play'):
                     return self.reply({'error': 'not found'}, 404)
                 try:
                     size = int(self.headers.get('Content-Length', '0'))
                     if not 0 < size <= 16384:
                         raise ValueError('请求过大或为空')
                     patch = json.loads(self.rfile.read(size))
+                    if not isinstance(patch, dict):
+                        raise ValueError('invalid request')
+                    if path.endswith('/packs'):
+                        if patch.get('action') == 'select' and set(patch) == {'action', 'id'}:
+                            owner.select_pack(patch['id'])
+                        elif patch.get('action') == 'import' and set(patch) == {'action', 'path'} and isinstance(patch['path'], str) and patch['path'].strip():
+                            if not owner.import_lock.acquire(blocking=False):
+                                return self.reply({'error': '正在导入，请等待完成后刷新角色包列表；请勿重复导入。'}, 409)
+                            try:
+                                owner.pack_store.import_pack(Path(patch['path']).expanduser())
+                            finally:
+                                owner.import_lock.release()
+                        else:
+                            raise ValueError('invalid pack action')
+                        return self.reply(owner.pack_snapshot())
+                    if path.endswith('/play'):
+                        if set(patch) != {'clip'} or not isinstance(patch['clip'], str):
+                            raise ValueError('invalid clip')
+                        with owner.lock:
+                            if patch['clip'] not in owner.manifest['clips']:
+                                raise ValueError('unknown clip')
+                            if not owner.store.value['enabled']:
+                                return self.reply({'error': '请先在设置中启用大肥鱼，再点播动画。'}, 409)
+                            if owner.suppressed_pid is not None and owner.suppressed_pid == owner.host_pid:
+                                return self.reply({'error': '大肥鱼已手动关闭，请在设置中关闭并重新开启大肥鱼，再点播动画。'}, 409)
+                            if owner.process is None or owner.process.poll() is not None:
+                                return self.reply({'error': '桌面角色尚未运行，请确认 Codex 已打开并等待大肥鱼启动。'}, 409)
+                            owner.send(message('play', clip=patch['clip']))
+                        return self.reply({'ok': True})
+                    validated(patch)
                     with owner.lock:
+                        if 'petPack' in patch:
+                            owner.select_pack(patch['petPack'])
                         was_enabled = owner.store.value['enabled']
                         value = owner.store.update(patch)
                         if value['enabled'] and not was_enabled:
@@ -241,9 +294,9 @@ class Host:
                         self.reply({'error': '请求读取超时'}, 408)
                     except OSError:
                         pass
-                except (ValueError, TypeError, UnicodeError):
+                except (ValueError, TypeError, UnicodeError, OSError) as error:
                     self.close_connection = True
-                    self.reply({'error': '设置值无效'}, 400)
+                    self.reply({'error': str(error) or '设置值无效'}, 400)
 
             do_PATCH = do_POST
 
@@ -278,11 +331,31 @@ class Host:
 
         return Handler
 
+    def pack_snapshot(self):
+        with self.lock:
+            return {'packs': self.pack_store.list(), 'selected': self.store.value['petPack'], 'manifest': self.manifest}
+
+    def select_pack(self, pack_id):
+        with self.lock:
+            assets = self.pack_store.resolve(pack_id)
+            manifest = json.loads((assets / 'pet-manifest.json').read_text())
+            frames = {f for c in manifest['clips'].values() for f in c['frames']}
+            if pack_id == self.store.value['petPack']:
+                return
+            self.store.update({'petPack': pack_id})
+            running = self.process is not None
+            if running:
+                self.stop_helper()
+            self.assets, self.manifest, self.frames = assets, manifest, frames
+            self.send(message('pack', selected=pack_id))
+            if running and self.store.value['enabled']:
+                self.start_helper()
+
     def send(self, msg):
         with self.lock:
             self.event_cursor += 1
             self.recent_events.append((self.event_cursor, msg))
-            if msg['kind'] not in ('pulse', 'alert'):
+            if msg['kind'] not in ('pulse', 'alert', 'play'):
                 self.latest[msg['kind']] = msg
             if self.process is not None and self.process.poll() is None:
                 try:
@@ -388,7 +461,7 @@ class Host:
             if msg is None:
                 continue
             self.send(msg)
-        self.send(message('balance', summary=self.balance_summary()))
+        self.send(message('balance', **self.balance, summary=self.balance_summary()))
 
     def helper_errors(self, proc):
         # Drain stderr without retaining arbitrary native messages or triggering pipe deadlocks.
