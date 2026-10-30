@@ -178,6 +178,12 @@ final class AnimationModel {
         return startOverlay(clipName, purpose: .manual, loop: false, restart: true, turns: rules.turn.contains(clipName))
     }
 
+    func nextAmbientDelayMs(remainingMs: Int, activityLevel: String, roll: Double) -> Int {
+        let interval = idleMicroInterval(activityLevel: activityLevel)
+        let fraction = roll.isFinite ? min(1, max(0, roll)) : 0
+        return max(0, remainingMs) + interval.lowerBound + Int(Double(interval.upperBound - interval.lowerBound) * fraction)
+    }
+
     func nextAmbient(roll: Double, categoryRoll: Double, actionRoll: Double) -> AnimationRules.Choice? {
         rules.choose(roll: roll, categoryRoll: categoryRoll, actionRoll: actionRoll,
             mirrored: mirrored, previous: lastAmbientClip ?? activeClipName)

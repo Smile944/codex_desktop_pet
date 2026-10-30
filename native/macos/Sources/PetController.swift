@@ -82,6 +82,9 @@ final class PetController: NSObject {
     var bubbleScale: Double
     var reducedMotion: Bool
     var activityLevel: String
+    var allowsCurrentMotion: Bool {
+        !reducedMotion && (randomAnimations || model.overlayPurpose == .manual)
+    }
     var soundEnabled: Bool
     var soundStates: Set<String>
     var bubbleMode: String
@@ -434,7 +437,7 @@ final class PetController: NSObject {
         let delay: Double
         if hasPools {
             let remaining = model.overlayRemainingMs > 0 ? model.overlayRemainingMs : model.activeClip.frames.count * model.activeClip.frameMs
-            delay = max(0.05, Double(remaining) / 1000)
+            delay = Double(model.nextAmbientDelayMs(remainingMs: remaining, activityLevel: activityLevel, roll: Double.random(in: 0..<1))) / 1000
         } else {
             delay = Double(model.overlayRemainingMs + Int.random(in: model.idleMicroInterval(activityLevel: activityLevel))) / 1000
         }
@@ -503,7 +506,7 @@ final class PetController: NSObject {
         let hadPulse = model.pulseState != nil
         let previousFrame = model.frame
         let previousClip = model.activeClipName
-        if let plan = motion, motionClip == model.overlayClipName, !dragging, !reducedMotion, randomAnimations {
+        if let plan = motion, motionClip == model.overlayClipName, !dragging, allowsCurrentMotion {
             let position = plan.position(at: Double(now - motionStartedMs) / 1000)
             moveToPet(position.x, position.y)
         } else if motion != nil { stopMotion() }
@@ -757,7 +760,7 @@ final class PetController: NSObject {
         let previousClip = model.activeClipName
         guard model.playManual(clip) else { return }
         stopMotion()
-        if !reducedMotion, randomAnimations, let plan = plannedMotion(for: clip) { startMotion(plan, clip: clip) }
+        if allowsCurrentMotion, let plan = plannedMotion(for: clip) { startMotion(plan, clip: clip) }
         manualDeadlineMs = Self.nowMs() + model.overlayRemainingMs
         syncFrameTransition(previousFrame: previousFrame, previousClip: previousClip)
         lastTickMs = Self.nowMs()
@@ -945,7 +948,7 @@ final class PetController: NSObject {
             randomAnimations = enabled
             if !enabled {
                 microTimer?.invalidate()
-                stopMotion()
+                if model.overlayPurpose != .manual { stopMotion() }
                 if model.overlayPurpose == .decoration { model.clearOverlay() }
             } else { scheduleMicro() }
         }

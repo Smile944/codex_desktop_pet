@@ -301,4 +301,11 @@ final class AnimationModelTests: XCTestCase {
         XCTAssertEqual(model.nextAmbient(roll: 0, categoryRoll: 0, actionRoll: 0)?.clip, "b")
     }
 
+    func testConfiguredPoolRetainsActivityLevelRestIntervals() {
+        let model = AnimationModel(manifest: [:])
+        XCTAssertEqual(model.nextAmbientDelayMs(remainingMs: 10000, activityLevel: "quiet", roll: 0), 55000)
+        XCTAssertEqual(model.nextAmbientDelayMs(remainingMs: 10000, activityLevel: "normal", roll: 0), 35000)
+        XCTAssertEqual(model.nextAmbientDelayMs(remainingMs: 10000, activityLevel: "lively", roll: 1), 32000)
+    }
+
 }

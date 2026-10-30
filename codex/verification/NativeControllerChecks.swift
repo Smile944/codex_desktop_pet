@@ -79,6 +79,12 @@ libraryController.model.clearOverlay()
 libraryController.apply(["kind": "play", "clip": "packIdle"])
 libraryController.apply(["kind": "config", "randomAnimations": false])
 XCTAssertEqual(libraryController.model.overlayClipName, "packIdle")
+XCTAssertTrue(libraryController.allowsCurrentMotion)
+libraryController.reducedMotion = true
+XCTAssertFalse(libraryController.allowsCurrentMotion)
+libraryController.reducedMotion = false
+libraryController.model.clearOverlay()
+XCTAssertFalse(libraryController.allowsCurrentMotion)
 libraryController.beginDrag()
 XCTAssertEqual(libraryController.model.activeClipName, "packClick")
 libraryController.endDrag()
