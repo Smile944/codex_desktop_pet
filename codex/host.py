@@ -25,6 +25,7 @@ from usage import parse_usage, read_usage, usage_summary
 from scale_policy import MIN_SCALE, MAX_SCALE, normalize_saved_scale
 from client_bundle import client_source
 from runtime_status import read_runtime_status
+from permission_hooks import pending_threads, apply_pending
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('CODEX_BIGFISH_HOME', Path.home() / 'Library/Application Support/Codex BigFish'))
@@ -489,6 +490,11 @@ class Host:
                     self.events_seen += 1
         statuses=self.runtime_status.get('threads',{}) if self.runtime_status['status']=='ready' and time.monotonic()-self.runtime_status.get('checkedAt',0)<12 else {}
         self.registry.apply_runtime_status(statuses)
+        previous={sid for sid,s in self.registry.sessions.items() if s.hook_waiting}
+        apply_pending(self.registry,pending_threads(DATA,since=self.started))
+        if any(s.hook_waiting and sid not in previous and (not s.child or self.registry.include_subagents)
+               for sid,s in self.registry.sessions.items()):
+            self.send(message('alert',alert='APPROVAL'))
         current = self.registry.messages()
         healthy = [p for p in self.known_paths if self.tail.status.get(p) == 'readable' and self.tail.valid_lines.get(p, 0)]
         active_unavailable = any(self.tail.status.get(p) in ('unavailable', 'invalid') and

@@ -87,11 +87,12 @@ def verify(dmg, execute=True):
             # Use the real CLI in a disposable HOME/CODEX_HOME, never the user's registry.
             (home/'.codex').mkdir()
             run(runtime, '-E', '-s', '-B', app/'Contents/Resources/codex/install_plugin.py', env=env)
+            run(runtime, '-E', '-s', '-B', app/'Contents/Resources/codex/install_hooks.py', env=env)
             verification = str(Path(__file__).resolve().parent)
             native = run(runtime, '-E', '-s', '-B', '-c',
                          'import sys,json; sys.path.insert(0,'+repr(verification)+'); '
                          'from verify_mcp_plugin import native_discovery; '
-                         'print(json.dumps(native_discovery('+repr(manifest['version'])+')))', env=env)
+                         'print(json.dumps(native_discovery('+repr(manifest['version'])+',include_hooks=True)))', env=env)
             discovery = json.loads(native.stdout)
             assert discovery['settingsCapability'] and discovery['discoveredToolCount'] == 9
         return dict(arch=manifest['arch'], version=manifest['version'], runtimeExecuted=execute,

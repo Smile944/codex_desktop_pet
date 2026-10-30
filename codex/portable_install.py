@@ -71,6 +71,8 @@ def main(argv=None):
         print('正在注册 Codex 插件…', flush=True)
         subprocess.run([installed_python(DEST), '-E', '-s', '-B',
                         str(resources / 'codex/install_plugin.py')], check=True)
+        subprocess.run([installed_python(DEST), '-E', '-s', '-B',
+                        str(resources / 'codex/install_hooks.py')], check=True)
     except (OSError, subprocess.SubprocessError) as exc:
         print('安装未完成：' + str(exc) + '\n请修复上方错误后重新运行安装器；用户设置保留。', flush=True)
         return 1

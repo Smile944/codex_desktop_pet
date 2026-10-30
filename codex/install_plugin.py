@@ -16,6 +16,10 @@ def prepare_package(source, package, runtime):
     launcher=package/'run-server'
     launcher.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+shlex.quote(runtime)+' -E -s -B "$(dirname "$0")/server.py"\n')
     launcher.chmod(0o755)
+    hook = package/'hooks/run-hook'
+    if hook.parent.is_dir():
+        hook.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+shlex.quote(runtime)+' -E -s -B "$(dirname "$0")/observe.py"\n')
+        hook.chmod(0o755)
     server=mcp['mcpServers']['bigfish']
     server['command']='./run-server'
     server['args']=[]

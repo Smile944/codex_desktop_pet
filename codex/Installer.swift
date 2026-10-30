@@ -70,7 +70,7 @@ DispatchQueue.global(qos: .userInitiated).async {
         let result = NSAlert()
         result.messageText = installed ? "安装完成" : "安装未完成"
         result.informativeText = installed
-            ? "请在 Codex → 设置 → 插件中打开“大肥鱼 · Codex”。插件列表未刷新时，重新进入或重启 Codex。安装磁盘可以安全推出。"
+            ? "请在 Codex → 设置 → 插件中打开“大肥鱼 · Codex”。审批状态同步还需要宿主支持并启用 Hooks，且由你审查、信任桌宠的观察 Hook。插件列表未刷新时，重新进入或重启 Codex。安装磁盘可以安全推出。"
             : String(resultText.suffix(4000))
         result.addButton(withTitle: "好")
         result.runModal()

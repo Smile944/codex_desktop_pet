@@ -36,7 +36,7 @@ class SetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='bigfish setup ') as directory:
             root = Path(directory)
             (root / 'codex').mkdir()
-            for name in ('build.py', 'install.py', 'install_plugin.py'):
+            for name in ('build.py', 'install.py', 'install_plugin.py', 'install_hooks.py'):
                 (root / 'codex' / name).write_text(
                     'import pathlib, sys\n'
                     'with pathlib.Path("trace").open("a") as output:\n'
@@ -44,7 +44,7 @@ class SetupTests(unittest.TestCase):
             setup.run_install(root)
             lines = (root / 'trace').read_text().splitlines()
             self.assertEqual(lines, [name + '|' + sys.executable for name in
-                                    ('build.py', 'install.py', 'install_plugin.py')])
+                                    ('build.py', 'install.py', 'install_plugin.py', 'install_hooks.py')])
 
     def test_failure_stops_later_stages(self):
         with tempfile.TemporaryDirectory() as directory:

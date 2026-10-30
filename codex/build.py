@@ -40,7 +40,7 @@ def build(app=APP, runtime=None, arch=None):
     code = resources / 'codex'
     code.mkdir()
     for name in ('host.py', 'adapter.py', 'launcher.py', 'usage.py', 'scale_policy.py', 'client_bundle.py', 'runtime_status.py',
-                 'install.py', 'install_plugin.py', 'portable_install.py'):
+                 'install.py', 'install_plugin.py', 'portable_install.py', 'permission_hooks.py', 'install_hooks.py'):
         shutil.copy2(ROOT / 'codex' / name, code / name)
     for name in ('ui', 'vendor', 'plugin'):
         shutil.copytree(ROOT / 'codex' / name, code / name)

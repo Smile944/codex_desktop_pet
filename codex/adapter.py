@@ -102,6 +102,11 @@ class SessionState:
     observed_live: bool = False
     thread_id: str = ''
     runtime_waiting: bool = False
+    hook_waiting: bool = False
+
+    @property
+    def waiting(self):
+        return self.runtime_waiting or self.hook_waiting
 
 
 class SessionRegistry:
@@ -241,8 +246,8 @@ class SessionRegistry:
 
     def active(self):
         return sorted(((sid, s) for sid, s in self.sessions.items()
-                       if (s.state != 'IDLE' and s.observed_live or s.runtime_waiting) and (not s.child or self.include_subagents)),
-                      key=lambda row: (row[1].state == 'WAITING' or row[1].runtime_waiting, row[1].updated), reverse=True)
+                       if (s.state != 'IDLE' and s.observed_live or s.waiting) and (not s.child or self.include_subagents)),
+                      key=lambda row: (row[1].state == 'WAITING' or row[1].waiting, row[1].updated), reverse=True)
 
     def apply_runtime_status(self,statuses):
         for s in self.sessions.values():
@@ -261,11 +266,11 @@ class SessionRegistry:
             if s.todos:
                 done = sum(r.get('status') == 'completed' for r in s.todos)
                 detail += f' · {done}/{len(s.todos)}'
-            shown='WAITING' if s.runtime_waiting else s.state
-            state = message('state', state=shown, activity='' if s.runtime_waiting else s.activity, message=copy[shown], detail=detail)
+            shown='WAITING' if s.waiting else s.state
+            state = message('state', state=shown, activity='' if s.waiting else s.activity, message=copy[shown], detail=detail)
         else:
             state = message('state', state='IDLE', message='我在这儿等新任务哦', detail='Codex · 等待下一次任务')
-        tasks = [dict(sessionId=sid, state='WAITING' if s.runtime_waiting else s.state, project=s.project, title=s.project,
-                      message={'THINKING': '思考中', 'WORKING': '干活中', 'WAITING': '等你呢'}['WAITING' if s.runtime_waiting else s.state],
+        tasks = [dict(sessionId=sid, state='WAITING' if s.waiting else s.state, project=s.project, title=s.project,
+                      message={'THINKING': '思考中', 'WORKING': '干活中', 'WAITING': '等你呢'}['WAITING' if s.waiting else s.state],
                       detail=s.project + ' · Codex') for sid, s in active]
         return [state, message('tasks', tasks=tasks)]

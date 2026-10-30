@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "codex-bigfish",
-  "version": "0.4.1",
+  "version": "0.5.2",
   "description": "本机大肥鱼桌面伴侣与 Codex 原生会话面板。",
   "author": {
     "name": "本地适配"

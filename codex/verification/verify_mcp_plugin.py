@@ -13,10 +13,10 @@ from usage import UsageRPC
 
 
 class PluginInspectionRPC(UsageRPC):
-    ALLOWED={'initialize','initialized','plugin/read','mcpServerStatus/list'}
+    ALLOWED={'initialize','initialized','plugin/read','mcpServerStatus/list','hooks/list'}
 
 
-def native_discovery(version):
+def native_discovery(version,include_hooks=False):
     rpc=PluginInspectionRPC(timeout=20)
     try:
         rpc('initialize',{'clientInfo':{'name':'bigfish_plugin_verification','version':version},
@@ -33,8 +33,15 @@ def native_discovery(version):
         assert server['serverCapabilities']['experimental']['openai/settings']=={
             'readTool':'settings_read','updateTool':'settings_update'}
         assert {'settings_read','settings_update','open_bigfish'} <= server['tools'].keys()
-        return {'serverNames':plugin['mcpServers'],'settingsCapability':True,
+        result={'serverNames':plugin['mcpServers'],'settingsCapability':True,
                 'discoveredToolCount':len(server['tools']),'toolsError':server['toolsError']}
+        if include_hooks:
+            groups=rpc('hooks/list',{})['data']
+            hooks=[h for group in groups for h in group['hooks'] if h.get('statusMessage')=='大肥鱼：仅观察审批状态']
+            assert len(hooks)==8
+            assert all(h['enabled'] and h['trustStatus']=='untrusted' for h in hooks)
+            result.update(observerHookCount=8,untrustedObserverHookCount=8)
+        return result
     finally:
         rpc.close()
 

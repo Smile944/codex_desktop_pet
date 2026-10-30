@@ -58,9 +58,9 @@ def preflight(root):
 
 
 def run_install(root):
-    """Stop on the first failed stage; pin all three to this usable runtime."""
+    """Stop on the first failed stage; pin all stages to this usable runtime."""
     for name, label in (('build.py', '构建桌宠'), ('install.py', '安装并启动桌宠'),
-                        ('install_plugin.py', '注册 Codex 插件')):
+                        ('install_plugin.py', '注册 Codex 插件'), ('install_hooks.py', '准备待审查的观察 Hooks')):
         print(label + '…', flush=True)
         subprocess.run([sys.executable, '-B', str(root / 'codex' / name)], cwd=str(root), check=True)
 
