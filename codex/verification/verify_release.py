@@ -57,9 +57,9 @@ def sandbox_environment(home, data):
 
 def verify_library(manifest):
     canonical = manifest['libraryClips']
-    assert len(canonical) == len(set(canonical)) == 106, 'canonical animation count'
+    assert len(canonical) == len(set(canonical)) == 104, 'canonical animation count'
     frames = sum(len(manifest['clips'][name]['frames']) for name in canonical)
-    assert frames == 25423, f'canonical frame count: {frames}'
+    assert frames == 24941, f'canonical frame count: {frames}'
     return dict(canonicalClips=len(canonical), canonicalFrames=frames)
 
 
@@ -168,8 +168,8 @@ def verify(dmg, execute=True):
                 assert '启用大肥鱼' in replies[2]['result']['contents'][0]['text']
                 library = verify_library(replies[3]['result']['structuredContent'])
                 packs = replies[4]['result']['structuredContent']
-                assert packs['selected'] == 'builtin' and len(packs['manifest']['libraryClips']) == 106
-                assert any(pack['id'] == 'builtin' and pack['clipCount'] == 106 for pack in packs['packs'])
+                assert packs['selected'] == 'builtin' and len(packs['manifest']['libraryClips']) == 104
+                assert any(pack['id'] == 'builtin' and pack['clipCount'] == 104 for pack in packs['packs'])
                 frames = replies[5]['result']['structuredContent']
                 assert frames['total'] > 1 and len(frames['frames']) == 1
                 assert next(iter(frames['frames'].values())).startswith('data:image/webp;base64,')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild the pinned 106-clip library from upstream VP9-alpha WebM sources.
+"""Rebuild the approved subset from the pinned 106 upstream VP9-alpha WebM clips.
 
 Example: python3 scripts/import_full_library.py --source /path/dsh-pet --ffmpeg /path/ffmpeg
 The source tree must contain assets/webm and config.jsonc. Keeps all 640x360 pixels.
@@ -17,6 +17,7 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'codex'))
 from pet_packs import read_jsonc, normalize_config, encode_video, create_manifest, clip_key
+from animation_policy import excluded_action, filter_config
 
 COMMIT='34cf7ec4dd1ca99a9a9ac5bcb4571d887862e226'
 REPOSITORY='https://github.com/PC2005-cloud/dsh-pet'
@@ -26,10 +27,13 @@ def rebuild(source,ffmpeg,output=ROOT):
     source,output=Path(source),Path(output)
     config_path=source/'assets/config.jsonc'
     if not config_path.exists():config_path=source/'config.jsonc'
-    config=read_jsonc(config_path.read_text())
+    config=filter_config(read_jsonc(config_path.read_text()))
     normalize_config(config)
     videos=sorted((source/'assets/webm').glob('*.webm'))
     if len(videos)!=106:raise ValueError('Expected exactly 106 source WebM clips')
+    source_count=len(videos)
+    excluded=[video.stem for video in videos if excluded_action(video.stem)]
+    videos=[video for video in videos if not excluded_action(video.stem)]
     previous=json.loads((output/'assets/pet-manifest.json').read_text())
     output_root=output/'assets'
     with tempfile.TemporaryDirectory(prefix='library-',dir=output/'codex/dist') as stage:
@@ -46,15 +50,16 @@ def rebuild(source,ffmpeg,output=ROOT):
             for name,clip in pool.map(convert,videos):
                 clips[name]=clip
                 print(name,len(clip['frames']),flush=True)
-        manifest=create_manifest(clips,config,'原版大肥鱼 · 完整动画库',source={
+        manifest=create_manifest(clips,config,'原版大肥鱼 · 动画库',source={
             'repository':REPOSITORY,'commit':COMMIT,'directory':'dsh-pet/assets/webm',
             'fps':24,'crop':[0,0,640,360],'webpQuality':68,
             'decoder':'libvpx-vp9 (WebM alpha BlockAdditions)',
-            'sourceCount':106,'converterSha256':hashlib.sha256(Path(ffmpeg).read_bytes()).hexdigest()})
+            'sourceCount':source_count,'includedCount':len(videos),'excludedClips':excluded,'converterSha256':hashlib.sha256(Path(ffmpeg).read_bytes()).hexdigest()})
         # Keep the existing semantic names as references to canonical frames (no duplication).
         for name,old in previous['clips'].items():
             if name in clips:continue
             canonical=Path(old['source']['file']).stem
+            if excluded_action(canonical):continue
             full=clips[canonical]
             start=old['source'].get('startFrame',0);end=old['source'].get('endFrame',len(full['frames']))
             # An existing full clip should use the current full source, sliced drag stays sliced.
@@ -78,7 +83,7 @@ def rebuild(source,ffmpeg,output=ROOT):
             os.replace(backup,output_root/'pet');raise
         shutil.rmtree(backup)
         (output_root/'animation-library.json').write_text(json.dumps(library,ensure_ascii=False,indent=2)+'\n')
-        print(json.dumps({'sourceCount':len(videos),'canonicalFrames':sum(v['frames'] for v in library.values()),
+        print(json.dumps({'sourceCount':source_count,'includedCount':len(videos),'canonicalFrames':sum(v['frames'] for v in library.values()),
                           'bytes':sum(p.stat().st_size for p in (output_root/'pet').rglob('*.webp'))}),flush=True)
 
 

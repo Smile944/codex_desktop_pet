@@ -137,8 +137,8 @@ XCTAssertEqual(tiny.residentFrameCount, 0)
 // Exercise every shipped canonical entry through the actual play protocol.
 let shipped = controller(using: manifest)
 let shippedGroups = shipped.animationGroups().flatMap { $0.1 }
-XCTAssertEqual(shippedGroups.count, 106)
-XCTAssertEqual(Set(shippedGroups).count, 106)
+XCTAssertEqual(shippedGroups.count, 104)
+XCTAssertEqual(Set(shippedGroups).count, 104)
 XCTAssertEqual(shipped.model.rules.clicks.count, 5)
 shipped.apply(["kind": "state", "state": "WORKING", "activity": "editing"])
 for clip in shippedGroups {

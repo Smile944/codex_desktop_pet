@@ -13,7 +13,7 @@ verifier=importlib.util.module_from_spec(spec);spec.loader.exec_module(verifier)
 class ReleaseVerifierTests(unittest.TestCase):
     def test_canonical_manifest_counts_ignore_compatibility_aliases(self):
         manifest=json.loads((ROOT/'assets/pet-manifest.json').read_text())
-        self.assertEqual(verifier.verify_library(manifest),{'canonicalClips':106,'canonicalFrames':25423})
+        self.assertEqual(verifier.verify_library(manifest),{'canonicalClips':104,'canonicalFrames':24941})
         manifest['libraryClips']=manifest['libraryClips'][:-1]
         with self.assertRaises(AssertionError):verifier.verify_library(manifest)
 
@@ -28,7 +28,7 @@ class ReleaseVerifierTests(unittest.TestCase):
                 with urllib.request.urlopen(endpoint['url']+'/plugins/dsh-dafeiyu/packs',timeout=3) as reply:
                     packs=json.load(reply)
                 self.assertEqual(packs['selected'],'builtin')
-                self.assertEqual(len(packs['manifest']['libraryClips']),106)
+                self.assertEqual(len(packs['manifest']['libraryClips']),104)
                 with urllib.request.urlopen(endpoint['url']+'/health',timeout=3) as reply:
                     health=json.load(reply)
                 self.assertFalse(health['helperRunning'])

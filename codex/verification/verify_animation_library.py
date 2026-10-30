@@ -17,7 +17,7 @@ def verify(root, output, sources=None):
     manifest=json.loads((root/'assets/pet-manifest.json').read_text())
     inventory=json.loads((root/'assets/animation-library.json').read_text())
     names=manifest['libraryClips']
-    assert len(names)==106 and len(set(names))==106
+    assert len(names)==104 and len(set(names))==104
     assert set(inventory)==set(names)
     font=ImageFont.truetype('/System/Library/Fonts/PingFang.ttc',15)
     sheet=Image.new('RGB',(5*384,22*250),'#eceff3')
@@ -53,7 +53,7 @@ def verify(root, output, sources=None):
         draw.text((x+5,y+124),f'{len(clip["frames"])} 帧 · 首 / 中 / 尾',fill='#48505c',font=font)
         rows[name]={'frames':len(clip['frames']),'alphaUnionBounds':bounds}
     output.mkdir(parents=True,exist_ok=True)
-    sheet.save(output/'all-106-contact-sheet.jpg',quality=90)
+    sheet.save(output/'all-104-contact-sheet.jpg',quality=90)
     report={'clips':len(names),'framesDecoded':total,'blankFrames':blank,
             'sourceCommit':manifest['assetSource']['commit'],
             'canvas':[640,360],'lossyWebPQuality':68,'clipsDetail':rows,
